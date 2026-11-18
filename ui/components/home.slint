@@ -1,0 +1,24 @@
+import { Button, LineEdit, GroupBox, HorizontalBox, VerticalBox } from "std-widgets.slint";
+
+export component HomePage inherits VerticalBox {
+    padding: 16px;
+    spacing: 14px;
+
+    Text {
+        text: "Welcome to the CTT Application!";
+        font-size: 18px;
+        font-weight: 600;
+        color: #ffffff;
+    }
+
+    Text {
+        text: "This is the home page of the application. Use the navigation buttons to explore different features.";
+        font-size: 14px;
+        color: #a0aec0;
+    }
+
+    Button {
+        text: "Go to Settings";
+        clicked => { /* Navigate to settings page */ }
+    }
+}

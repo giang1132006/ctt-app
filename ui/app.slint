@@ -1,0 +1,143 @@
+import { Button, LineEdit, GroupBox, HorizontalBox, VerticalBox } from "std-widgets.slint";
+
+export component AppWindow inherits Window {
+    title: "CTT App";
+    preferred-width: 900px;
+    preferred-height: 620px;
+    min-width: 480px;
+    min-height: 360px;
+    background: #1e1e24;
+
+    in-out property <int> counter: 0;
+    in-out property <string> search-query: "";
+    in-out property <string> status-text: "Ready";
+
+    callback increment-counter();
+    callback quit-requested();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 14px;
+
+        // Top bar
+        HorizontalBox {
+            padding: 0px;
+            spacing: 12px;
+
+            Text {
+                text: "CTT Application";
+                font-size: 20px;
+                font-weight: 700;
+                color: #ffffff;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                background: #2d3748;
+                border-radius: 4px;
+                width: 60px;
+                height: 24px;
+                Text {
+                    text: "v0.1.0";
+                    font-size: 11px;
+                    color: #a0aec0;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            Rectangle { /* spacer */ }
+
+            Button {
+                text: "Quit";
+                clicked => { root.quit-requested(); }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: #33333f;
+        }
+
+        // Search Section
+        HorizontalBox {
+            padding: 0px;
+            spacing: 10px;
+
+            Text {
+                text: "Search:";
+                font-size: 14px;
+                color: #e2e8f0;
+                vertical-alignment: center;
+            }
+
+            LineEdit {
+                text <=> root.search-query;
+                placeholder-text: "Search key mappings, macros, or profiles...";
+                font-size: 14px;
+            }
+        }
+
+        // Demo interaction migrated from starter shell
+        GroupBox {
+            title: "Counter Demonstration";
+            VerticalBox {
+                spacing: 10px;
+                HorizontalBox {
+                    spacing: 12px;
+                    Button {
+                        text: "Increment";
+                        primary: true;
+                        clicked => { root.increment-counter(); }
+                    }
+
+                    Text {
+                        text: "Count: " + root.counter;
+                        font-size: 15px;
+                        font-weight: 600;
+                        color: #63b3ed;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Peripheral Management Roadmap Section
+        GroupBox {
+            title: "Peripheral Management (Gaming Driver)";
+            VerticalBox {
+                spacing: 8px;
+                Text {
+                    text: "Key Remapping & Macro Engine";
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: #cbd5e0;
+                }
+                Text {
+                    text: "Configure physical to logical key bindings, mouse triggers, and macro sequences.";
+                    font-size: 12px;
+                    color: #718096;
+                }
+            }
+        }
+
+        // Spacer to push status bar to bottom
+        Rectangle { }
+
+        Rectangle {
+            height: 1px;
+            background: #33333f;
+        }
+
+        // Bottom Status Bar
+        HorizontalBox {
+            padding: 0px;
+            Text {
+                text: "Status: " + root.status-text;
+                font-size: 12px;
+                color: #a0aec0;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
