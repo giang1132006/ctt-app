@@ -19,13 +19,21 @@ cargo --version
 ```text
 ctt-app/
 ├── .agents/               # AI Agent rules (.agents/rules/) and skills (.agents/skills/)
+├── ui/                    # Slint declarative UI views (app.slint, components/*.slint)
 ├── src/
-│   ├── main.rs            # Application entry point & eframe NativeOptions
-│   └── app.rs             # CttApp eframe::App placeholder UI
+│   ├── main.rs            # Application entry point & Slint callback wiring
+│   ├── lib.rs             # Library root exporting domain, engine, platform, storage, app
+│   ├── app.rs             # CttApp UI coordinator
+│   ├── domain/            # Pure Rust key/mouse identifiers, rules, validation, profiles
+│   ├── engine/            # RemapEngine state machine & command snapshots
+│   ├── platform/          # OS traits, MockInputSynthesizer, and Windows keymap/packet scaffolding
+│   └── storage/           # Atomic profile persistence and schema validation
+├── tests/                 # Integration tests for domain validation and RemapEngine
+├── build.rs               # Compiles ui/app.slint via slint-build
 ├── .gitignore             # Ignores /target
 ├── AGENTS.md              # Root AI Agent instructions & workflow
 ├── ARCHITECTURE.md        # Current & target layered architecture
-├── Cargo.toml             # Package manifest (eframe 0.31, egui 0.31)
+├── Cargo.toml             # Package manifest (slint 1.19, slint-build 1.19)
 ├── DECISIONS.md           # Architectural Decision Records (ADRs)
 ├── DEVELOPMENT_GUIDE.md   # This guide
 ├── PROJECT_CONTEXT.md     # Scope, stack, constraints, and status

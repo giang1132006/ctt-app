@@ -1,16 +1,21 @@
 # Roadmap (`ctt-app`)
 
 ## Current Development Stage
-**Stage 0 — Project Scaffold & AI Agent Operating System Initialization**
+**Stage 1 — Layered Key Binding Domain, Remap Engine, Atomic Storage & Slint Binding UI**
 
-Only the initial Rust `eframe`/`egui` desktop window shell exists today. Core application domains (macros, key mapping, configuration persistence, and OS input integration) have not yet been implemented.
+The 4-layer repository structure (`domain`, `engine`, `platform`, `storage`, `ui`) and full Keyboard-to-Keyboard/Mouse binding logic are implemented and tested against `MockInputSynthesizer`. Live Win32 FFI hook installation (`ADR-003`) and macro recording/playback remain upcoming milestones.
 
 ---
 
 ## Completed Milestones
 - **M0.1 — Repository Initialization**: Git repository created with [README.md](README.md).
-- **M0.2 — Rust GUI Scaffold**: Created [.gitignore](.gitignore), [Cargo.toml](Cargo.toml) (`eframe = "0.31"`, `egui = "0.31"`), [src/main.rs](src/main.rs), and [src/app.rs](src/app.rs) starter UI. *(Pending first local `cargo check`/`cargo run` verification in user's shell.)*
-- **M0.3 — AI Agent Operating System**: Established [AGENTS.md](AGENTS.md), modular rules in `.agents/rules/`, 10 specialized skills in `.agents/skills/`, and core architectural/context documentation.
+- **M0.2 — Rust + Slint GUI Scaffold**: Created [.gitignore](.gitignore), [Cargo.toml](Cargo.toml) (`slint = "1.19"`, `slint-build = "1.19"`), [build.rs](build.rs), [ui/app.slint](ui/app.slint), [src/main.rs](src/main.rs), and [src/app.rs](src/app.rs).
+- **M0.3 — AI Agent Operating System**: Established [AGENTS.md](AGENTS.md), modular rules in `.agents/rules/`, specialized skills in `.agents/skills/`, and core architectural/context documentation.
+- **M1 — Key Binding Domain, Remap Engine, Atomic Storage & UI Integration**:
+  - Implemented `src/domain/` (`keys.rs`, `mapping.rs`, `validation.rs`, `profile.rs`, `config.rs`, `macros.rs`) supporting all 123 standard keyboard keys + `OemScanCode` mapped to any keyboard key, combo, mouse button, mouse wheel, or disabled state.
+  - Implemented `src/engine/` (`remapper.rs`, `command.rs`) with `O(1)` dispatch, `ActiveHolds` tracking, mouse hold anti-spam, profile-switch release, loop prevention, and emergency stop cleanup.
+  - Implemented `src/platform/` traits, `MockInputSynthesizer`, Win32 keymap/scancode mapping table, and `src/storage/` atomic `ProfileStore`.
+  - Built Slint `BindingView` (`ui/components/binding_view.slint`) and `StatusBar` (`ui/components/status_bar.slint`), plus unit & integration test suites.
 
 ---
 

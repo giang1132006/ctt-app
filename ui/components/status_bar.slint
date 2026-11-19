@@ -1,0 +1,151 @@
+export component StatusBar inherits Rectangle {
+    in property <string> active-profile-name: "Profile mặc định";
+    in property <string> engine-status-text: "Paused";
+    in property <bool> mapping-active: false;
+    in property <bool> emergency-stopped: false;
+    in property <string> emergency-stop-hotkey: "Ctrl + Shift + F12";
+    in property <string> status-text: "Ready";
+
+    callback toggle-mapping();
+    callback emergency-stop();
+
+    height: 48px;
+    background: #ffffff;
+
+    VerticalLayout {
+        spacing: 0px;
+
+        Rectangle {
+            height: 1px;
+            background: #e2e8f0;
+        }
+
+        HorizontalLayout {
+            padding-left: 20px;
+            padding-right: 20px;
+            spacing: 14px;
+            alignment: space-between;
+
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+
+                // Status indicator badge
+                Rectangle {
+                    height: 28px;
+                    border-radius: 14px;
+                    background: root.emergency-stopped
+                        ? #fee2e2
+                        : (root.mapping-active ? #dcfce7 : #f1f5f9);
+                    border-width: 1px;
+                    border-color: root.emergency-stopped
+                        ? #fecaca
+                        : (root.mapping-active ? #bbf7d0 : #e2e8f0);
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 12px;
+                        spacing: 6px;
+
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            border-radius: 4px;
+                            background: root.emergency-stopped
+                                ? #dc2626
+                                : (root.mapping-active ? #16a34a : #64748b);
+                            y: (parent.height - self.height) / 2;
+                        }
+
+                        Text {
+                            text: root.engine-status-text;
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: root.emergency-stopped
+                                ? #991b1b
+                                : (root.mapping-active ? #166534 : #475569);
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.active-profile-name + " · " + root.status-text;
+                    font-size: 12.5px;
+                    color: #475569;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: end;
+
+                Rectangle {
+                    height: 28px;
+                    border-radius: 6px;
+                    background: #f8fafc;
+                    border-width: 1px;
+                    border-color: #e2e8f0;
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+
+                        Text {
+                            text: "Panic: " + root.emergency-stop-hotkey;
+                            font-size: 11.5px;
+                            color: #64748b;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 30px;
+                    width: 112px;
+                    border-radius: 6px;
+                    background: toggle-touch.pressed
+                        ? (root.mapping-active ? #cbd5e1 : #3730a3)
+                        : (toggle-touch.has-hover ? (root.mapping-active ? #e2e8f0 : #4338ca) : (root.mapping-active ? #f1f5f9 : #4f46e5));
+
+                    Text {
+                        text: root.mapping-active ? "Tạm dừng" : "Kích hoạt";
+                        font-size: 12.5px;
+                        font-weight: 600;
+                        color: root.mapping-active ? #1e293b : #ffffff;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    toggle-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.toggle-mapping(); }
+                    }
+                }
+
+                Rectangle {
+                    height: 30px;
+                    width: 96px;
+                    border-radius: 6px;
+                    background: stop-touch.pressed ? #991b1b : (stop-touch.has-hover ? #b91c1c : #dc2626);
+
+                    Text {
+                        text: "Stop All";
+                        font-size: 12.5px;
+                        font-weight: 700;
+                        color: #ffffff;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    stop-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.emergency-stop(); }
+                    }
+                }
+            }
+        }
+    }
+}

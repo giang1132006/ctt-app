@@ -1,24 +1,406 @@
-import { Button, LineEdit, GroupBox, HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 
-export component HomePage inherits VerticalBox {
-    padding: 16px;
-    spacing: 14px;
+export struct BindingItem {
+    action: string,
+    shortcut: string,
+}
 
-    Text {
-        text: "Welcome to the CTT Application!";
-        font-size: 18px;
-        font-weight: 600;
-        color: #ffffff;
+export component BindingTable inherits Rectangle {
+    in property <[BindingItem]> bindings: [];
+
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #e2e8f0;
+    clip: true;
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // Table Header Row
+        Rectangle {
+            height: 40px;
+            background: #f8fafc;
+
+            HorizontalLayout {
+                spacing: 0px;
+
+                Rectangle {
+                    horizontal-stretch: 78;
+                    min-width: 0px;
+                    preferred-width: 0px;
+
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+
+                        Text {
+                            text: "Hành động";
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: #64748b;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 1px;
+                    background: #e2e8f0;
+                }
+
+                Rectangle {
+                    horizontal-stretch: 22;
+                    min-width: 0px;
+                    preferred-width: 0px;
+
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+
+                        Text {
+                            text: "Phím tắt";
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: #64748b;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Table Data Rows
+        if root.bindings.length == 0: VerticalLayout {
+            spacing: 0px;
+
+            Rectangle {
+                height: 1px;
+                background: #e2e8f0;
+            }
+
+            Rectangle {
+                height: 52px;
+                background: #ffffff;
+
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+
+                    Text {
+                        text: "Chưa có dữ liệu binding — hãy tạo Profile và gán phím ở tab Binding.";
+                        font-size: 13px;
+                        color: #64748b;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+
+        for item in root.bindings: VerticalLayout {
+            spacing: 0px;
+
+            Rectangle {
+                height: 1px;
+                background: #e2e8f0;
+            }
+
+            Rectangle {
+                height: 40px;
+                background: #ffffff;
+
+                HorizontalLayout {
+                    spacing: 0px;
+
+                    Rectangle {
+                        horizontal-stretch: 78;
+                        min-width: 0px;
+                        preferred-width: 0px;
+
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            padding-right: 14px;
+
+                            Text {
+                                text: item.action;
+                                font-size: 13.5px;
+                                color: #1e293b;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 1px;
+                        background: #e2e8f0;
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 22;
+                        min-width: 0px;
+                        preferred-width: 0px;
+
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            padding-right: 14px;
+
+                            Text {
+                                text: item.shortcut;
+                                font-size: 13.5px;
+                                color: #1e293b;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
+}
 
-    Text {
-        text: "This is the home page of the application. Use the navigation buttons to explore different features.";
-        font-size: 14px;
-        color: #a0aec0;
-    }
+export component HomePage inherits Rectangle {
+    in property <bool> has-profile: false;
+    in property <[string]> profile-names: [];
+    in property <int> active-profile-index: 0;
+    in property <string> active-profile-name: "Chưa có profile";
+    in property <[BindingItem]> bindings: [];
+    in property <string> binding-summary: "Chưa có profile · Hãy tạo profile trước để bắt đầu bind phím";
+    in-out property <bool> dropdown-open: false;
 
-    Button {
-        text: "Go to Settings";
-        clicked => { /* Navigate to settings page */ }
+    callback select-profile(int);
+    callback create-profile();
+    callback delete-profile();
+
+    background: #f8fafc;
+
+    ScrollView {
+        width: 100%;
+        height: 100%;
+
+        VerticalLayout {
+            padding: 28px;
+            spacing: 18px;
+            alignment: start;
+
+            Text {
+                text: "Tổng quan";
+                font-size: 26px;
+                font-weight: 700;
+                color: #0f172a;
+            }
+
+            // Outer container card
+            Rectangle {
+                background: #ffffff;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: #e2e8f0;
+
+                VerticalLayout {
+                    padding: 24px;
+                    spacing: 20px;
+
+                    // Profile Card
+                    Rectangle {
+                        background: #ffffff;
+                        border-radius: 10px;
+                        border-width: 1px;
+                        border-color: #e2e8f0;
+
+                        VerticalLayout {
+                            padding: 20px;
+                            spacing: 12px;
+
+                            Text {
+                                text: "Profile";
+                                font-size: 16px;
+                                font-weight: 700;
+                                color: #0f172a;
+                            }
+
+                            HorizontalLayout {
+                                height: 40px;
+                                spacing: 12px;
+
+                                // Profile Dropdown Trigger
+                                dropdown-box := Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 40px;
+                                    background: !root.has-profile
+                                        ? #f8fafc
+                                        : (dropdown-touch.has-hover ? #f8fafc : #ffffff);
+                                    border-radius: 8px;
+                                    border-width: 1px;
+                                    border-color: (root.dropdown-open && root.has-profile) ? #4f46e5 : #e2e8f0;
+
+                                    HorizontalLayout {
+                                        padding-left: 14px;
+                                        padding-right: 14px;
+                                        spacing: 8px;
+
+                                        Text {
+                                            text: root.active-profile-name;
+                                            font-size: 13.5px;
+                                            color: root.has-profile ? #1e293b : #64748b;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 1;
+                                            overflow: elide;
+                                        }
+
+                                        Text {
+                                            text: (root.dropdown-open && root.has-profile) ? "▴" : "▾";
+                                            font-size: 13px;
+                                            color: root.has-profile ? #475569 : #94a3b8;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    dropdown-touch := TouchArea {
+                                        mouse-cursor: root.has-profile ? pointer : default;
+                                        clicked => {
+                                            if root.has-profile {
+                                                root.dropdown-open = !root.dropdown-open;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Primary Create Profile Button
+                                create-btn := Rectangle {
+                                    width: 100px;
+                                    height: 40px;
+                                    border-radius: 8px;
+                                    background: create-touch.pressed ? #3730a3 : (create-touch.has-hover ? #4338ca : #4f46e5);
+
+                                    Text {
+                                        text: "Tạo mới";
+                                        color: #ffffff;
+                                        font-size: 13.5px;
+                                        font-weight: 600;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    create-touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => {
+                                            root.dropdown-open = false;
+                                            root.create-profile();
+                                        }
+                                    }
+                                }
+
+                                // Outlined Danger Delete Profile Button
+                                delete-btn := Rectangle {
+                                    width: 110px;
+                                    height: 40px;
+                                    border-radius: 8px;
+                                    background: !root.has-profile
+                                        ? #f8fafc
+                                        : (delete-touch.pressed ? #fee2e2 : (delete-touch.has-hover ? #fef2f2 : #ffffff));
+                                    border-width: 1px;
+                                    border-color: root.has-profile ? #f3c6c6 : #e2e8f0;
+
+                                    Text {
+                                        text: "Xoá profile";
+                                        color: root.has-profile ? #b91c1c : #94a3b8;
+                                        font-size: 13.5px;
+                                        font-weight: 600;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    delete-touch := TouchArea {
+                                        mouse-cursor: root.has-profile ? pointer : default;
+                                        clicked => {
+                                            if root.has-profile {
+                                                root.dropdown-open = false;
+                                                root.delete-profile();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Expandable Profile List
+                            if root.dropdown-open && root.has-profile: Rectangle {
+                                background: #ffffff;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: #e2e8f0;
+                                clip: true;
+
+                                VerticalLayout {
+                                    spacing: 0px;
+
+                                    for name[idx] in root.profile-names: Rectangle {
+                                        height: 36px;
+                                        background: idx == root.active-profile-index
+                                            ? #eef2ff
+                                            : (item-touch.has-hover ? #f8fafc : #ffffff);
+
+                                        HorizontalLayout {
+                                            padding-left: 14px;
+                                            padding-right: 14px;
+
+                                            Text {
+                                                text: name;
+                                                font-size: 13.5px;
+                                                font-weight: idx == root.active-profile-index ? 600 : 400;
+                                                color: idx == root.active-profile-index ? #4f46e5 : #1e293b;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+                                        }
+
+                                        item-touch := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                root.dropdown-open = false;
+                                                root.select-profile(idx);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Binding Card
+                    Rectangle {
+                        background: #ffffff;
+                        border-radius: 10px;
+                        border-width: 1px;
+                        border-color: #e2e8f0;
+
+                        VerticalLayout {
+                            padding: 20px;
+                            spacing: 12px;
+
+                            Text {
+                                text: "Binding";
+                                font-size: 16px;
+                                font-weight: 700;
+                                color: #0f172a;
+                            }
+
+                            BindingTable {
+                                bindings: root.bindings;
+                            }
+
+                            Text {
+                                text: root.binding-summary;
+                                font-size: 12.5px;
+                                color: #64748b;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

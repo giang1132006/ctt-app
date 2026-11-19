@@ -1,0 +1,760 @@
+import { LineEdit, ScrollView } from "std-widgets.slint";
+
+export struct BindingRuleItem {
+    source-key: string,
+    target-action: string,
+    label: string,
+    enabled: bool,
+}
+
+component SelectDropdown inherits VerticalLayout {
+    in property <[string]> options: [];
+    in-out property <int> current-index: 0;
+    in property <bool> open: false;
+    in property <string> placeholder: "Chọn...";
+    callback toggle();
+    callback close();
+
+    spacing: 6px;
+
+    Rectangle {
+        height: 38px;
+        background: trigger-touch.has-hover ? #f8fafc : #ffffff;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: root.open ? #4f46e5 : #cbd5e1;
+
+        HorizontalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            spacing: 8px;
+
+            Text {
+                text: (root.current-index >= 0 && root.current-index < root.options.length)
+                    ? root.options[root.current-index]
+                    : root.placeholder;
+                font-size: 13.5px;
+                font-weight: 600;
+                color: (root.current-index >= 0 && root.current-index < root.options.length)
+                    ? #0f172a
+                    : #64748b;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+
+            Text {
+                text: root.open ? "▴" : "▾";
+                font-size: 13px;
+                color: #475569;
+                vertical-alignment: center;
+            }
+        }
+
+        trigger-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.toggle(); }
+        }
+    }
+
+    if root.open: Rectangle {
+        height: root.options.length > 6
+            ? 216px
+            : (root.options.length == 0 ? 38px : root.options.length * 36px + 2px);
+        background: #ffffff;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: #cbd5e1;
+        clip: true;
+
+        ScrollView {
+            width: 100%;
+            height: 100%;
+
+            VerticalLayout {
+                spacing: 0px;
+                alignment: start;
+
+                for opt[idx] in root.options: Rectangle {
+                    height: 36px;
+                    background: idx == root.current-index
+                        ? #eef2ff
+                        : (opt-touch.has-hover ? #f8fafc : #ffffff);
+
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+
+                        Text {
+                            text: opt;
+                            font-size: 13.5px;
+                            font-weight: idx == root.current-index ? 600 : 400;
+                            color: idx == root.current-index ? #4f46e5 : #1e293b;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+
+                    opt-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.current-index = idx;
+                            root.close();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+component ModToggle inherits Rectangle {
+    in property <string> label;
+    in-out property <bool> checked: false;
+
+    width: 66px;
+    height: 32px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.checked ? #4f46e5 : #cbd5e1;
+    background: root.checked ? #eef2ff : (mod-touch.has-hover ? #f8fafc : #ffffff);
+
+    Text {
+        text: root.label;
+        font-size: 12.5px;
+        font-weight: root.checked ? 700 : 500;
+        color: root.checked ? #4f46e5 : #475569;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    mod-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.checked = !root.checked; }
+    }
+}
+
+component KindTab inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 32px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.active ? #4f46e5 : #e2e8f0;
+    background: root.active ? #eef2ff : (tab-touch.has-hover ? #f8fafc : #ffffff);
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+
+        Text {
+            text: root.label;
+            font-size: 12.5px;
+            font-weight: root.active ? 600 : 500;
+            color: root.active ? #4f46e5 : #475569;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    tab-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component BindingView inherits Rectangle {
+    in property <bool> has-profile: false;
+    in property <string> active-profile-name: "Chưa có profile";
+    in property <[string]> source-key-names: [];
+    in property <[string]> keyboard-key-names: [];
+    in property <[string]> mouse-button-names: [];
+    in property <[string]> mouse-wheel-names: [];
+    in property <[BindingRuleItem]> rules: [];
+    in property <string> binding-summary: "";
+    in property <string> validation-error: "";
+    in property <string> validation-warning: "";
+
+    in-out property <int> selected-source-idx: 0;
+    in-out property <int> selected-target-kind: 0;
+    in-out property <int> selected-target-key-idx: 0;
+    in-out property <bool> mod-ctrl: false;
+    in-out property <bool> mod-shift: false;
+    in-out property <bool> mod-alt: false;
+    in-out property <bool> mod-meta: false;
+    in-out property <int> selected-mouse-btn-idx: 0;
+    in-out property <int> selected-wheel-idx: 0;
+    in-out property <string> draft-label: "";
+
+    // -1 = closed, 0 = source key, 1 = target key, 2 = mouse button, 3 = mouse wheel
+    in-out property <int> active-dropdown: -1;
+
+    callback create-profile();
+    callback apply-binding(int, int, int, bool, bool, bool, bool, int, int, string);
+    callback remove-binding(int);
+
+    background: #f8fafc;
+
+    ScrollView {
+        width: 100%;
+        height: 100%;
+
+        VerticalLayout {
+            padding: 28px;
+            spacing: 18px;
+            alignment: start;
+
+            Text {
+                text: "Binding";
+                font-size: 26px;
+                font-weight: 700;
+                color: #0f172a;
+            }
+
+            // Empty-profile gate
+            if !root.has-profile: Rectangle {
+                background: #ffffff;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: #e2e8f0;
+
+                VerticalLayout {
+                    padding: 28px;
+                    spacing: 14px;
+                    alignment: start;
+
+                    Text {
+                        text: "Chưa có Profile nào";
+                        font-size: 18px;
+                        font-weight: 700;
+                        color: #0f172a;
+                    }
+
+                    Text {
+                        text: "Bạn cần tạo ít nhất một Profile trước khi có thể gán phím bàn phím hoặc nút chuột.";
+                        font-size: 13.5px;
+                        color: #64748b;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalLayout {
+                        alignment: start;
+
+                        Rectangle {
+                            width: 168px;
+                            height: 40px;
+                            border-radius: 8px;
+                            background: gate-create-touch.pressed ? #3730a3 : (gate-create-touch.has-hover ? #4338ca : #4f46e5);
+
+                            Text {
+                                text: "+ Tạo Profile mới";
+                                color: #ffffff;
+                                font-size: 13.5px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            gate-create-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.create-profile(); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Rule Editor Card (requires an active profile)
+            if root.has-profile: Rectangle {
+                background: #ffffff;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: #e2e8f0;
+
+                VerticalLayout {
+                    padding: 24px;
+                    spacing: 16px;
+
+                    Text {
+                        text: "Gán phím mới / Cập nhật — " + root.active-profile-name;
+                        font-size: 16px;
+                        font-weight: 700;
+                        color: #0f172a;
+                    }
+
+                    Text {
+                        text: "Mọi nút chuột (5 nút) và phím bàn phím (123 phím chuẩn) đều có thể bind sang phím bàn phím khác, tổ hợp phím, nút chuột hoặc con lăn chuột.";
+                        font-size: 13px;
+                        color: #64748b;
+                        wrap: word-wrap;
+                    }
+
+                    // Source Input Row (Mouse Buttons + Keyboard Keys)
+                    HorizontalLayout {
+                        spacing: 12px;
+
+                        Text {
+                            text: "Phím nguồn:";
+                            width: 110px;
+                            height: 38px;
+                            font-size: 13.5px;
+                            font-weight: 600;
+                            color: #1e293b;
+                            vertical-alignment: center;
+                        }
+
+                        SelectDropdown {
+                            horizontal-stretch: 1;
+                            options: root.source-key-names;
+                            current-index <=> root.selected-source-idx;
+                            open: root.active-dropdown == 0;
+                            toggle => {
+                                root.active-dropdown = (root.active-dropdown == 0) ? -1 : 0;
+                            }
+                            close => {
+                                root.active-dropdown = -1;
+                            }
+                        }
+                    }
+
+                    // Target Kind Selector
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        Text {
+                            text: "Loại đích:";
+                            width: 110px;
+                            font-size: 13.5px;
+                            font-weight: 600;
+                            color: #1e293b;
+                            vertical-alignment: center;
+                        }
+
+                        KindTab {
+                            label: "Phím";
+                            active: root.selected-target-kind == 0;
+                            clicked => {
+                                root.active-dropdown = -1;
+                                root.selected-target-kind = 0;
+                            }
+                        }
+
+                        KindTab {
+                            label: "Tổ hợp phím";
+                            active: root.selected-target-kind == 1;
+                            clicked => {
+                                root.active-dropdown = -1;
+                                root.selected-target-kind = 1;
+                            }
+                        }
+
+                        KindTab {
+                            label: "Nút chuột";
+                            active: root.selected-target-kind == 2;
+                            clicked => {
+                                root.active-dropdown = -1;
+                                root.selected-target-kind = 2;
+                            }
+                        }
+
+                        KindTab {
+                            label: "Cuộn chuột";
+                            active: root.selected-target-kind == 3;
+                            clicked => {
+                                root.active-dropdown = -1;
+                                root.selected-target-kind = 3;
+                            }
+                        }
+
+                        KindTab {
+                            label: "Vô hiệu hoá";
+                            active: root.selected-target-kind == 4;
+                            clicked => {
+                                root.active-dropdown = -1;
+                                root.selected-target-kind = 4;
+                            }
+                        }
+                    }
+
+                    // Dynamic Target Details
+                    if root.selected-target-kind == 0 || root.selected-target-kind == 1: VerticalLayout {
+                        spacing: 10px;
+
+                        if root.selected-target-kind == 1: HorizontalLayout {
+                            spacing: 8px;
+
+                            Text {
+                                text: "Modifier:";
+                                width: 110px;
+                                font-size: 13.5px;
+                                font-weight: 600;
+                                color: #1e293b;
+                                vertical-alignment: center;
+                            }
+
+                            ModToggle { label: "Ctrl"; checked <=> root.mod-ctrl; }
+                            ModToggle { label: "Shift"; checked <=> root.mod-shift; }
+                            ModToggle { label: "Alt"; checked <=> root.mod-alt; }
+                            ModToggle { label: "Win"; checked <=> root.mod-meta; }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 12px;
+
+                            Text {
+                                text: "Phím đích:";
+                                width: 110px;
+                                height: 38px;
+                                font-size: 13.5px;
+                                font-weight: 600;
+                                color: #1e293b;
+                                vertical-alignment: center;
+                            }
+
+                            SelectDropdown {
+                                horizontal-stretch: 1;
+                                options: root.keyboard-key-names;
+                                current-index <=> root.selected-target-key-idx;
+                                open: root.active-dropdown == 1;
+                                toggle => {
+                                    root.active-dropdown = (root.active-dropdown == 1) ? -1 : 1;
+                                }
+                                close => {
+                                    root.active-dropdown = -1;
+                                }
+                            }
+                        }
+                    }
+
+                    if root.selected-target-kind == 2: HorizontalLayout {
+                        spacing: 12px;
+
+                        Text {
+                            text: "Nút chuột:";
+                            width: 110px;
+                            height: 38px;
+                            font-size: 13.5px;
+                            font-weight: 600;
+                            color: #1e293b;
+                            vertical-alignment: center;
+                        }
+
+                        SelectDropdown {
+                            horizontal-stretch: 1;
+                            options: root.mouse-button-names;
+                            current-index <=> root.selected-mouse-btn-idx;
+                            open: root.active-dropdown == 2;
+                            toggle => {
+                                root.active-dropdown = (root.active-dropdown == 2) ? -1 : 2;
+                            }
+                            close => {
+                                root.active-dropdown = -1;
+                            }
+                        }
+                    }
+
+                    if root.selected-target-kind == 3: HorizontalLayout {
+                        spacing: 12px;
+
+                        Text {
+                            text: "Hướng cuộn:";
+                            width: 110px;
+                            height: 38px;
+                            font-size: 13.5px;
+                            font-weight: 600;
+                            color: #1e293b;
+                            vertical-alignment: center;
+                        }
+
+                        SelectDropdown {
+                            horizontal-stretch: 1;
+                            options: root.mouse-wheel-names;
+                            current-index <=> root.selected-wheel-idx;
+                            open: root.active-dropdown == 3;
+                            toggle => {
+                                root.active-dropdown = (root.active-dropdown == 3) ? -1 : 3;
+                            }
+                            close => {
+                                root.active-dropdown = -1;
+                            }
+                        }
+                    }
+
+                    // Optional Label + Submit
+                    HorizontalLayout {
+                        spacing: 12px;
+
+                        Text {
+                            text: "Mô tả:";
+                            width: 110px;
+                            font-size: 13.5px;
+                            font-weight: 600;
+                            color: #1e293b;
+                            vertical-alignment: center;
+                        }
+
+                        LineEdit {
+                            horizontal-stretch: 1;
+                            placeholder-text: "Tuỳ chọn (vd: Nhảy = Click trái)";
+                            text <=> root.draft-label;
+                        }
+
+                        Rectangle {
+                            width: 132px;
+                            height: 36px;
+                            border-radius: 8px;
+                            background: save-touch.pressed ? #3730a3 : (save-touch.has-hover ? #4338ca : #4f46e5);
+
+                            Text {
+                                text: "Lưu Binding";
+                                color: #ffffff;
+                                font-size: 13.5px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            save-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    root.active-dropdown = -1;
+                                    root.apply-binding(
+                                        root.selected-source-idx,
+                                        root.selected-target-kind,
+                                        root.selected-target-key-idx,
+                                        root.mod-ctrl,
+                                        root.mod-shift,
+                                        root.mod-alt,
+                                        root.mod-meta,
+                                        root.selected-mouse-btn-idx,
+                                        root.selected-wheel-idx,
+                                        root.draft-label
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    if root.validation-error != "": Rectangle {
+                        border-radius: 8px;
+                        background: #fef2f2;
+                        border-width: 1px;
+                        border-color: #fecaca;
+
+                        HorizontalLayout {
+                            padding: 10px;
+
+                            Text {
+                                text: root.validation-error;
+                                color: #b91c1c;
+                                font-size: 12.5px;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+
+                    if root.validation-warning != "": Rectangle {
+                        border-radius: 8px;
+                        background: #fffbeb;
+                        border-width: 1px;
+                        border-color: #fde68a;
+
+                        HorizontalLayout {
+                            padding: 10px;
+
+                            Text {
+                                text: root.validation-warning;
+                                color: #b45309;
+                                font-size: 12.5px;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Active Rules Table Card
+            if root.has-profile: Rectangle {
+                background: #ffffff;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: #e2e8f0;
+
+                VerticalLayout {
+                    padding: 24px;
+                    spacing: 12px;
+
+                    Text {
+                        text: "Danh sách Binding — " + root.active-profile-name;
+                        font-size: 16px;
+                        font-weight: 700;
+                        color: #0f172a;
+                    }
+
+                    Rectangle {
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #e2e8f0;
+                        clip: true;
+
+                        VerticalLayout {
+                            spacing: 0px;
+
+                            // Header
+                            Rectangle {
+                                height: 38px;
+                                background: #f8fafc;
+
+                                HorizontalLayout {
+                                    padding-left: 14px;
+                                    padding-right: 14px;
+                                    spacing: 12px;
+
+                                    Text {
+                                        text: "Phím nguồn";
+                                        horizontal-stretch: 24;
+                                        font-size: 13px;
+                                        font-weight: 600;
+                                        color: #64748b;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Text {
+                                        text: "Hành động đích";
+                                        horizontal-stretch: 32;
+                                        font-size: 13px;
+                                        font-weight: 600;
+                                        color: #64748b;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Text {
+                                        text: "Mô tả";
+                                        horizontal-stretch: 32;
+                                        font-size: 13px;
+                                        font-weight: 600;
+                                        color: #64748b;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Text {
+                                        text: "";
+                                        width: 64px;
+                                    }
+                                }
+                            }
+
+                            if root.rules.length == 0: VerticalLayout {
+                                spacing: 0px;
+
+                                Rectangle {
+                                    height: 1px;
+                                    background: #e2e8f0;
+                                }
+
+                                Rectangle {
+                                    height: 48px;
+                                    background: #ffffff;
+
+                                    HorizontalLayout {
+                                        padding-left: 14px;
+                                        padding-right: 14px;
+
+                                        Text {
+                                            text: "Profile này chưa có phím nào được bind.";
+                                            font-size: 13px;
+                                            color: #64748b;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                    }
+                                }
+                            }
+
+                            for rule[idx] in root.rules: VerticalLayout {
+                                spacing: 0px;
+
+                                Rectangle {
+                                    height: 1px;
+                                    background: #e2e8f0;
+                                }
+
+                                Rectangle {
+                                    height: 40px;
+                                    background: #ffffff;
+
+                                    HorizontalLayout {
+                                        padding-left: 14px;
+                                        padding-right: 14px;
+                                        spacing: 12px;
+
+                                        Text {
+                                            text: rule.source-key;
+                                            horizontal-stretch: 24;
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            color: #0f172a;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+
+                                        Text {
+                                            text: rule.target-action;
+                                            horizontal-stretch: 32;
+                                            font-size: 13px;
+                                            color: #4f46e5;
+                                            font-weight: 600;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+
+                                        Text {
+                                            text: rule.label;
+                                            horizontal-stretch: 32;
+                                            font-size: 13px;
+                                            color: #475569;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+
+                                        Rectangle {
+                                            width: 64px;
+                                            height: 26px;
+                                            y: (parent.height - self.height) / 2;
+                                            border-radius: 6px;
+                                            border-width: 1px;
+                                            border-color: #f3c6c6;
+                                            background: del-touch.pressed ? #fee2e2 : (del-touch.has-hover ? #fef2f2 : #ffffff);
+
+                                            Text {
+                                                text: "Xoá";
+                                                font-size: 12px;
+                                                font-weight: 600;
+                                                color: #b91c1c;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+
+                                            del-touch := TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.remove-binding(idx); }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: root.binding-summary;
+                        font-size: 12.5px;
+                        color: #64748b;
+                    }
+                }
+            }
+        }
+    }
+}

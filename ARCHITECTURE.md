@@ -6,14 +6,19 @@ This document explicitly distinguishes between the **current implemented codebas
 
 ## 1. Current Implemented Architecture
 
-At present, `ctt-app` consists solely of a single-crate Rust binary with two source files:
+`ctt-app` follows the four-layer architecture separating UI (`ui/`, `src/main.rs`, `src/app.rs`), pure domain logic (`src/domain/*`), runtime remapping engine (`src/engine/*`), platform abstractions & test mocks (`src/platform/*`), and profile persistence (`src/storage/*`):
 
-- [ui/app.slint](ui/app.slint) — Declarative Slint UI definition defining `AppWindow` with window sizing, top bar (`Quit`), search input, counter demonstration, peripheral management overview, and status bar.
+- [ui/app.slint](ui/app.slint) — Declarative Slint UI definition defining `AppWindow` with sidebar navigation (`Tổng quan`, `Macros`, `Binding`), view routing, and persistent [ui/components/status_bar.slint](ui/components/status_bar.slint).
+- [ui/components/home.slint](ui/components/home.slint) — Overview page, profile selector, and binding summary table.
+- [ui/components/binding_view.slint](ui/components/binding_view.slint) — Interactive key-binding editor allowing any standard keyboard key (`123` keys) to be bound to any keyboard key, modifier combo, mouse button, mouse wheel direction, or disabled state.
 - [build.rs](build.rs) — Build script invoking `slint_build::compile("ui/app.slint")`.
-- [src/main.rs](src/main.rs) — Instantiates `AppWindow`, binds event callbacks (`on_increment_counter`, `on_quit_requested`), links domain state, and runs the Slint event loop. Sets `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]` for release builds.
-- [src/app.rs](src/app.rs) — Defines `CttApp` state struct (`search_query: String`, `counter: i32`, `status: String`) with unit tests.
-
-No domain, engine, OS hook, persistence, or test modules exist yet.
+- [src/lib.rs](src/lib.rs) — Library root exporting `app`, `domain`, `engine`, `platform`, and `storage`.
+- [src/main.rs](src/main.rs) — Instantiates `AppWindow`, populates key/mouse catalogs, binds event callbacks, and runs the Slint event loop (`#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]` in release builds).
+- [src/app.rs](src/app.rs) — `CttApp` coordinator bridging Slint UI state with domain profiles, rule validation, and `RemapEngine`.
+- `src/domain/` (`keys.rs`, `mapping.rs`, `validation.rs`, `profile.rs`, `config.rs`, `macros.rs`) — Exhaustive `KeyboardKey` catalog (`123` standard keys + `OemScanCode`), `MouseButton`/`MouseWheel`, `MappingTarget`, `CompiledMappingTable` (`O(1)` lookup), conflict/swap/chain/safety validation, and `Profile` models.
+- `src/engine/` (`remapper.rs`, `command.rs`) — `RemapEngine` press/hold/auto-repeat/release state machine with `ActiveHolds` tracking, mouse hold anti-repeat, profile-switch release, and `EmergencyStop` cleanup.
+- `src/platform/` (`mod.rs`, `mock.rs`, `windows/*`) — `InputSynthesizer` and `InputInterceptor` traits, `MockInputSynthesizer`, bidirectional Win32 keymap table, and packet/hook scaffolding tagged with `CTT_SYNTHETIC_TAG` (live Win32 `SetWindowsHookExW`/`SendInput` FFI wiring remains **TBD** under `ADR-003`).
+- `src/storage/` (`profile_store.rs`, `error.rs`) — Schema-versioned profile serialization and atomic file writes (temp file + `sync_all` + rename).
 
 ---
 

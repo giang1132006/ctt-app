@@ -38,15 +38,18 @@ The planned functional scope covers three core domains (all currently **unimplem
 
 ## 6. Current Implementation Status
 - **Implemented**:
-  - Cargo package scaffold (`ctt-app` `v0.1.0`) in [Cargo.toml](Cargo.toml) and [`.gitignore`](.gitignore).
-  - Slint UI window (`900x620`, min `480x360`, title `"CTT App"`) in [ui/app.slint](ui/app.slint) compiled via [build.rs](build.rs) and bootstrapped in [src/main.rs](src/main.rs).
-  - Starter `CttApp` state struct in [src/app.rs](src/app.rs) with top bar (`Quit`), `"Status: Ready"` bar, `"Search:"` field, and `"Increment"` counter demo.
+  - Cargo package scaffold (`ctt-app` `v0.1.0`) in [Cargo.toml](Cargo.toml), [src/lib.rs](src/lib.rs), and [`.gitignore`](.gitignore).
+  - Slint UI shell (`AppWindow`), overview page ([ui/components/home.slint](ui/components/home.slint)), interactive Key Binding view ([ui/components/binding_view.slint](ui/components/binding_view.slint)), and persistent safety status bar ([ui/components/status_bar.slint](ui/components/status_bar.slint)) compiled via [build.rs](build.rs).
+  - Coordinator `CttApp` in [src/app.rs](src/app.rs) and entry point in [src/main.rs](src/main.rs).
+  - Pure `domain` layer (`src/domain/*`): exhaustive `KeyboardKey` (`123` standard keys + `OemScanCode`), `MouseButton`, `MouseWheel`, `MappingTarget`, `CompiledMappingTable` (`O(1)` lookup), `Profile`, and conflict/swap/chain/lockout validator.
+  - `engine` layer (`src/engine/*`): `RemapEngine` state machine handling key/combo/mouse press, hold, auto-repeat suppression, profile-switch release, synthetic loop filtering, and emergency stop cleanup.
+  - `platform` abstraction (`src/platform/*`): `InputSynthesizer`/`InputInterceptor` traits, `MockInputSynthesizer`, Win32 keymap round-trip table, and `CTT_SYNTHETIC_TAG` packet scaffolding.
+  - `storage` layer (`src/storage/*`): schema-versioned `ProfileStore` with atomic file writes and validation on load.
+  - Unit tests (`src/**`) and integration tests (`tests/key_mapping_domain_tests.rs`, `tests/remap_engine_tests.rs`).
 - **Not Yet Implemented**:
-  - Domain models (`macros`, `mapping`, `config`).
-  - OS input hooks, event synthesis, and background execution engine.
-  - Persistent storage for profiles, macros, and settings.
-  - Automated unit or integration tests (`tests/` or `#[cfg(test)]` modules).
-  - `Cargo.lock` (dependencies have not yet been resolved/built in this repository).
+  - Live Windows OS hook/synthesis FFI wiring (`SetWindowsHookExW` / `SendInput` — **TBD** under `ADR-003`).
+  - Macro recording, editor UI, and playback timing engine (`src/domain/macros.rs` is currently a stub).
+  - Application config persistence wiring at startup (`AppConfig` disk load/save).
 
 ## 7. Important Constraints & Known Limitations
 - **OS Hook Latency & Stability**: Windows low-level keyboard/mouse hooks (`WH_KEYBOARD_LL` / `WH_MOUSE_LL`, if chosen) have strict timeout limits and must never block.

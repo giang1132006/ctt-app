@@ -1,142 +1,281 @@
-import { Button, LineEdit, GroupBox, HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { Palette, ScrollView } from "std-widgets.slint";
+import { HomePage, BindingItem } from "components/home.slint";
+import { BindingView, BindingRuleItem } from "components/binding_view.slint";
+import { StatusBar } from "components/status_bar.slint";
+
+export { BindingItem, BindingRuleItem }
+
+component NavItem inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 40px;
+    border-radius: 8px;
+    background: root.active
+        ? #ede9fe
+        : (nav-touch.pressed ? #e2e8f0 : (nav-touch.has-hover ? #f1f5f9 : transparent));
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+
+        Text {
+            text: root.label;
+            font-size: 14px;
+            font-weight: root.active ? 600 : 500;
+            color: root.active ? #4f46e5 : #64748b;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    nav-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
 
 export component AppWindow inherits Window {
-    title: "CTT App";
-    preferred-width: 900px;
-    preferred-height: 620px;
-    min-width: 480px;
-    min-height: 360px;
-    background: #1e1e24;
+    title: "CTT Project";
+    preferred-width: 1080px;
+    preferred-height: 720px;
+    min-width: 760px;
+    min-height: 520px;
+    background: #f8fafc;
 
+    init => {
+        Palette.color-scheme = ColorScheme.light;
+    }
+
+    // Navigation & profile state
+    in-out property <int> active-tab: 0;
+    in-out property <bool> has-profile: false;
+    in-out property <[string]> profile-names: [];
+    in-out property <int> active-profile-index: 0;
+    in-out property <string> active-profile-name: "Chưa có profile";
+    in-out property <[BindingItem]> bindings: [];
+    in-out property <string> binding-summary: "Chưa có profile · Hãy tạo profile trước để bắt đầu bind phím";
+
+    // Key binding editor & engine state
+    in-out property <[string]> source-key-names: [];
+    in-out property <[string]> keyboard-key-names: [];
+    in-out property <[string]> mouse-button-names: [];
+    in-out property <[string]> mouse-wheel-names: [];
+    in-out property <[BindingRuleItem]> rule-items: [];
+    in-out property <string> validation-error: "";
+    in-out property <string> validation-warning: "";
+    in-out property <string> engine-status-text: "Paused";
+    in-out property <bool> mapping-active: false;
+    in-out property <bool> emergency-stopped: false;
+    in-out property <string> emergency-stop-hotkey: "Ctrl + Shift + F12";
+
+    // Preserved legacy properties for backward compatibility
     in-out property <int> counter: 0;
     in-out property <string> search-query: "";
     in-out property <string> status-text: "Ready";
 
+    callback select-tab(int);
+    callback select-profile(int);
+    callback create-profile();
+    callback delete-profile();
+    callback apply-binding(int, int, int, bool, bool, bool, bool, int, int, string);
+    callback remove-binding(int);
+    callback toggle-mapping();
+    callback emergency-stop();
     callback increment-counter();
     callback quit-requested();
 
-    VerticalBox {
-        padding: 16px;
-        spacing: 14px;
+    HorizontalLayout {
+        spacing: 0px;
 
-        // Top bar
-        HorizontalBox {
-            padding: 0px;
-            spacing: 12px;
-
-            Text {
-                text: "CTT Application";
-                font-size: 20px;
-                font-weight: 700;
-                color: #ffffff;
-                vertical-alignment: center;
-            }
-
-            Rectangle {
-                background: #2d3748;
-                border-radius: 4px;
-                width: 60px;
-                height: 24px;
-                Text {
-                    text: "v0.1.0";
-                    font-size: 11px;
-                    color: #a0aec0;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-            }
-
-            Rectangle { /* spacer */ }
-
-            Button {
-                text: "Quit";
-                clicked => { root.quit-requested(); }
-            }
-        }
-
+        // Left Navigation Sidebar
         Rectangle {
-            height: 1px;
-            background: #33333f;
-        }
+            width: 215px;
+            background: #ffffff;
 
-        // Search Section
-        HorizontalBox {
-            padding: 0px;
-            spacing: 10px;
+            VerticalLayout {
+                padding-top: 28px;
+                padding-bottom: 20px;
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 0px;
 
-            Text {
-                text: "Search:";
-                font-size: 14px;
-                color: #e2e8f0;
-                vertical-alignment: center;
-            }
+                Text {
+                    text: "CTT Project";
+                    font-size: 18px;
+                    font-weight: 700;
+                    color: #0f172a;
+                }
 
-            LineEdit {
-                text <=> root.search-query;
-                placeholder-text: "Search key mappings, macros, or profiles...";
-                font-size: 14px;
-            }
-        }
+                Rectangle { height: 24px; }
 
-        // Demo interaction migrated from starter shell
-        GroupBox {
-            title: "Counter Demonstration";
-            VerticalBox {
-                spacing: 10px;
-                HorizontalBox {
-                    spacing: 12px;
-                    Button {
-                        text: "Increment";
-                        primary: true;
-                        clicked => { root.increment-counter(); }
-                    }
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-bottom: 10px;
 
                     Text {
-                        text: "Count: " + root.counter;
-                        font-size: 15px;
-                        font-weight: 600;
-                        color: #63b3ed;
-                        vertical-alignment: center;
+                        text: "ĐIỀU HƯỚNG";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: #64748b;
+                        letter-spacing: 0.4px;
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 4px;
+
+                    NavItem {
+                        label: "Tổng quan";
+                        active: root.active-tab == 0;
+                        clicked => { root.select-tab(0); }
+                    }
+
+                    NavItem {
+                        label: "Macros";
+                        active: root.active-tab == 1;
+                        clicked => { root.select-tab(1); }
+                    }
+
+                    NavItem {
+                        label: "Binding";
+                        active: root.active-tab == 2;
+                        clicked => { root.select-tab(2); }
+                    }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                HorizontalLayout {
+                    padding-left: 6px;
+
+                    Text {
+                        text: "Thanh điều hướng";
+                        font-size: 12.5px;
+                        color: #64748b;
                     }
                 }
             }
         }
 
-        // Peripheral Management Roadmap Section
-        GroupBox {
-            title: "Peripheral Management (Gaming Driver)";
-            VerticalBox {
-                spacing: 8px;
-                Text {
-                    text: "Key Remapping & Macro Engine";
-                    font-size: 14px;
-                    font-weight: 600;
-                    color: #cbd5e0;
+        // Sidebar Separator
+        Rectangle {
+            width: 1px;
+            background: #e8ecf2;
+        }
+
+        // Main Content Area + Persistent Safety Status Bar
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 0px;
+
+            Rectangle {
+                vertical-stretch: 1;
+                background: #f8fafc;
+
+                if root.active-tab == 0: HomePage {
+                    width: 100%;
+                    height: 100%;
+                    has-profile: root.has-profile;
+                    profile-names: root.profile-names;
+                    active-profile-index: root.active-profile-index;
+                    active-profile-name: root.active-profile-name;
+                    bindings: root.bindings;
+                    binding-summary: root.binding-summary;
+                    select-profile(idx) => { root.select-profile(idx); }
+                    create-profile => { root.create-profile(); }
+                    delete-profile => { root.delete-profile(); }
                 }
-                Text {
-                    text: "Configure physical to logical key bindings, mouse triggers, and macro sequences.";
-                    font-size: 12px;
-                    color: #718096;
+
+                if root.active-tab == 1: ScrollView {
+                    width: 100%;
+                    height: 100%;
+
+                    VerticalLayout {
+                        padding: 28px;
+                        spacing: 18px;
+                        alignment: start;
+
+                        Text {
+                            text: "Macros";
+                            font-size: 26px;
+                            font-weight: 700;
+                            color: #0f172a;
+                        }
+
+                        Rectangle {
+                            background: #ffffff;
+                            border-radius: 12px;
+                            border-width: 1px;
+                            border-color: #e2e8f0;
+
+                            VerticalLayout {
+                                padding: 24px;
+                                spacing: 16px;
+
+                                Rectangle {
+                                    background: #ffffff;
+                                    border-radius: 10px;
+                                    border-width: 1px;
+                                    border-color: #e2e8f0;
+
+                                    VerticalLayout {
+                                        padding: 20px;
+                                        spacing: 10px;
+
+                                        Text {
+                                            text: "Quản lý Macro — " + root.active-profile-name;
+                                            font-size: 16px;
+                                            font-weight: 700;
+                                            color: #0f172a;
+                                        }
+
+                                        Text {
+                                            text: "Chưa có macro nào được cấu hình cho profile hiện tại. Hệ thống ghi và phát macro sẽ được tích hợp ở các bước tiếp theo.";
+                                            font-size: 13.5px;
+                                            color: #64748b;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if root.active-tab == 2: BindingView {
+                    width: 100%;
+                    height: 100%;
+                    has-profile: root.has-profile;
+                    active-profile-name: root.active-profile-name;
+                    source-key-names: root.source-key-names;
+                    keyboard-key-names: root.keyboard-key-names;
+                    mouse-button-names: root.mouse-button-names;
+                    mouse-wheel-names: root.mouse-wheel-names;
+                    rules: root.rule-items;
+                    binding-summary: root.binding-summary;
+                    validation-error: root.validation-error;
+                    validation-warning: root.validation-warning;
+                    create-profile => { root.create-profile(); }
+                    apply-binding(src, kind, tkey, ctrl, shift, alt, meta, mbtn, wheel, label) => {
+                        root.apply-binding(src, kind, tkey, ctrl, shift, alt, meta, mbtn, wheel, label);
+                    }
+                    remove-binding(idx) => { root.remove-binding(idx); }
                 }
             }
-        }
 
-        // Spacer to push status bar to bottom
-        Rectangle { }
-
-        Rectangle {
-            height: 1px;
-            background: #33333f;
-        }
-
-        // Bottom Status Bar
-        HorizontalBox {
-            padding: 0px;
-            Text {
-                text: "Status: " + root.status-text;
-                font-size: 12px;
-                color: #a0aec0;
-                vertical-alignment: center;
+            StatusBar {
+                horizontal-stretch: 1;
+                height: 35px;
+                active-profile-name: root.active-profile-name;
+                engine-status-text: root.engine-status-text;
+                mapping-active: root.mapping-active;
+                emergency-stopped: root.emergency-stopped;
+                emergency-stop-hotkey: root.emergency-stop-hotkey;
+                status-text: root.status-text;
+                toggle-mapping => { root.toggle-mapping(); }
+                emergency-stop => { root.emergency-stop(); }
             }
         }
     }
