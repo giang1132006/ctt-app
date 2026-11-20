@@ -1,0 +1,2315 @@
+import { LineEdit, ScrollView } from "std-widgets.slint";
+
+export struct UiClipItem {
+    id: int,
+    label: string,
+    dur-text: string,
+    x: length,
+    y: length,
+    width: length,
+    height: length,
+    // 0 = Key, 1 = Mouse (LC/MC/M3/M4), 2 = MouseRight (RC), 3 = KeyEmpty (?)
+    kind-tag: int,
+    selected: bool,
+    clashing: bool,
+    live: bool,
+}
+
+export struct UiRulerTick {
+    x: length,
+    is-major: bool,
+    label: string,
+}
+
+export struct UiTrackHeader {
+    index: int,
+    label: string,
+    y: length,
+    active: bool,
+    can-delete: bool,
+}
+
+export struct UiSavedMacroItem {
+    id: int,
+    name: string,
+    trigger-label: string,
+    clip-count: int,
+    total-ms: int,
+}
+
+component ToolIconBtn inherits Rectangle {
+    in property <string> path-data;
+    in property <string> path-data-2: "";
+    in property <string> tooltip: "";
+    in property <bool> enabled: true;
+    in property <bool> active: false;
+    in property <bool> danger: false;
+    in property <bool> recording-pulse: false;
+    callback clicked();
+    callback hovered-changed(string);
+
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: root.recording-pulse
+        ? #ef4444
+        : (root.active ? #2dd4bf88 : (btn-touch.has-hover && root.enabled ? #94a3b859 : #94a3b82e));
+    background: root.recording-pulse
+        ? #ef444438
+        : (root.active
+            ? #2dd4bf24
+            : (btn-touch.pressed && root.enabled
+                ? #1e293b
+                : (btn-touch.has-hover && root.enabled ? #131b2b : #0b111d)));
+    opacity: root.enabled ? 1.0 : 0.35;
+
+    Path {
+        width: 18px;
+        height: 18px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.path-data;
+        stroke: root.recording-pulse
+            ? #fca5a5
+            : (root.active ? #2dd4bf : (root.danger ? #fb7185 : #e7edf8));
+        stroke-width: 1.9px;
+        fill: root.recording-pulse ? #ef4444 : transparent;
+    }
+
+    if root.path-data-2 != "": Path {
+        width: 18px;
+        height: 18px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        commands: root.path-data-2;
+        stroke: root.recording-pulse
+            ? #fca5a5
+            : (root.active ? #2dd4bf : (root.danger ? #fb7185 : #e7edf8));
+        stroke-width: 1.9px;
+        fill: transparent;
+    }
+
+    btn-touch := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            if root.enabled {
+                root.clicked();
+            }
+        }
+        changed has-hover => {
+            if self.has-hover {
+                root.hovered-changed(root.tooltip);
+            } else {
+                root.hovered-changed("");
+            }
+        }
+    }
+}
+
+component AddChipBtn inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <color> accent-border: #94a3b838;
+    in property <color> accent-text: #e7edf8;
+    callback clicked();
+
+    height: 28px;
+    min-width: 48px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: add-touch.has-hover && root.enabled ? #2dd4bf88 : root.accent-border;
+    background: add-touch.pressed && root.enabled
+        ? #1e293b
+        : (add-touch.has-hover && root.enabled ? #131b2b : #0b111d);
+    opacity: root.enabled ? 1.0 : 0.35;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+
+        Text {
+            text: root.label;
+            font-size: 12px;
+            font-weight: 600;
+            color: root.accent-text;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+
+    add-touch := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            if root.enabled {
+                root.clicked();
+            }
+        }
+    }
+}
+
+component ModeChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 32px;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.active ? #4f46e5 : #cbd5e1;
+    background: root.active ? #eef2ff : (mode-touch.has-hover ? #f8fafc : #ffffff);
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+
+        Text {
+            text: root.label;
+            font-size: 12.5px;
+            font-weight: root.active ? 600 : 500;
+            color: root.active ? #4f46e5 : #475569;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    mode-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component MacrosView inherits Rectangle {
+    in property <bool> has-profile: false;
+    in property <string> active-profile-name: "Chưa có profile";
+    in property <[UiSavedMacroItem]> saved-macros: [];
+    in property <bool> editor-open: false;
+    in-out property <int> selected-saved-idx: 0;
+    in property <bool> saved-dropdown-open: false;
+
+    // Timeline counts & flags
+    in property <int> clip-count: 0;
+    in property <int> selected-count: 0;
+    in property <int> total-ms: 0;
+    in property <int> playhead-ms: 0;
+    in property <string> active-track-label: "T1";
+    in property <string> loop-status-text: "Vùng lặp: Không lặp";
+    in property <string> zoom-label: "200 ms / 100 px";
+    in property <bool> can-undo: false;
+    in property <bool> can-redo: false;
+    in property <bool> can-razor: false;
+    in property <bool> has-loop: false;
+    in property <bool> snap-enabled: true;
+    in property <bool> is-playing: false;
+    in property <bool> is-recording: false;
+    in property <bool> is-capturing-key: false;
+    in property <bool> is-capturing-hotkey: false;
+    in property <string> capture-banner: "";
+    in property <bool> hover-resize: false;
+
+    // Canvas geometry projections
+    in property <[UiClipItem]> clips: [];
+    in property <[UiRulerTick]> ruler-ticks: [];
+    in property <[UiTrackHeader]> track-headers: [];
+    in property <length> playhead-x: 58px;
+    in property <bool> has-loop-overlay: false;
+    in property <length> loop-x: 0px;
+    in property <length> loop-width: 0px;
+    in property <length> snap-guide-x: -100px;
+    in property <bool> show-snap-guide: false;
+    in property <bool> show-marquee: false;
+    in property <length> marquee-x: 0px;
+    in property <length> marquee-y: 0px;
+    in property <length> marquee-width: 0px;
+    in property <length> marquee-height: 0px;
+    in property <length> scroll-x-ratio: 0px;
+    in property <length> scroll-y-ratio: 0px;
+    in property <bool> show-h-scroll: false;
+    in property <bool> show-v-scroll: false;
+
+    // Inspector properties
+    in property <bool> inspector-visible: false;
+    in property <bool> inspector-multi: false;
+    in property <string> inspector-title: "";
+    in property <bool> inspector-is-key: false;
+    in property <string> inspector-key-label: "";
+    in property <int> inspector-mouse-idx: 0;
+    in property <[string]> mouse-button-names: [];
+    in-out property <string> inspector-start-text: "";
+    in-out property <string> inspector-dur-text: "";
+    in-out property <string> inspector-end-text: "";
+    in-out property <string> inspector-track-text: "";
+    in-out property <string> inspector-group-start-text: "";
+    in-out property <string> inspector-group-dur-text: "";
+    in-out property <string> gap-input-text: "100";
+    in-out property <string> playhead-input-text: "0";
+
+    // Form & status properties
+    in-out property <string> macro-name: "";
+    in property <string> hotkey-label: "Chưa gán (tuỳ chọn)";
+    in property <bool> has-hotkey: false;
+    in property <int> playback-mode-idx: 0;
+    in property <string> compiled-preview: "";
+    in property <string> status-message: "";
+    in property <bool> status-is-error: false;
+    in property <bool> status-is-success: false;
+
+    // Transient UI toggles
+    in-out property <bool> help-open: false;
+    in-out property <bool> preview-open: false;
+    in-out property <bool> saved-list-open: false;
+    in-out property <bool> inspector-mouse-open: false;
+    in-out property <string> hover-tooltip: "";
+
+    // Callbacks
+    callback create-profile();
+    callback new-macro();
+    callback close-editor();
+    callback open-io-modal();
+    callback save-macro();
+    callback load-saved-macro(int);
+    callback delete-saved-macro(int);
+    callback toolbar-action(string);
+    callback insert-key-clip();
+    callback insert-mouse-clip(int);
+    callback insert-gap(string);
+    callback set-playhead-text(string);
+    callback canvas-resized(float, float);
+    callback canvas-pointer-down(float, float, int, bool, bool, bool);
+    callback canvas-pointer-move(float, float, bool);
+    callback canvas-pointer-up(int, bool, bool, bool);
+    callback canvas-double-click(float, float, bool);
+    callback canvas-wheel(float, float, float, bool, bool);
+    callback canvas-key-pressed(string, bool, bool, bool, bool);
+    callback canvas-key-released(string);
+    callback inspector-commit-single(string, string, string, string, int);
+    callback inspector-select-mouse(int);
+    callback inspector-capture-key();
+    callback inspector-commit-group-start(string);
+    callback inspector-commit-group-dur(string);
+    callback macro-name-edited(string);
+    callback toggle-hotkey-capture();
+    callback clear-hotkey();
+    callback select-playback-mode(int);
+
+    background: #f8fafc;
+
+    ScrollView {
+        width: 100%;
+        height: 100%;
+
+        VerticalLayout {
+            padding: 24px;
+            spacing: 16px;
+            alignment: start;
+
+            // =========================================================================
+            // VIEW A: MACRO LIST VIEW (Default when entering Macros tab)
+            // =========================================================================
+            if !root.editor-open: VerticalLayout {
+                spacing: 18px;
+                alignment: start;
+
+                HorizontalLayout {
+                    spacing: 16px;
+                    alignment: space-between;
+
+                    VerticalLayout {
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: "Macros";
+                            font-size: 26px;
+                            font-weight: 700;
+                            color: #0f172a;
+                        }
+
+                        Text {
+                            text: "Quản lý danh sách Macro của Profile hiện tại. Bấm 'Tạo Macro' để mở trình thiết kế Timeline đa track.";
+                            font-size: 13px;
+                            color: #64748b;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    if root.has-profile: Rectangle {
+                        height: 40px;
+                        min-width: 146px;
+                        border-radius: 8px;
+                        background: create-macro-touch.pressed ? #3730a3 : (create-macro-touch.has-hover ? #4338ca : #4f46e5);
+
+                        HorizontalLayout {
+                            padding-left: 16px;
+                            padding-right: 16px;
+
+                            Text {
+                                text: "+ Tạo Macro";
+                                font-size: 13.5px;
+                                font-weight: 600;
+                                color: #ffffff;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        create-macro-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.new-macro(); }
+                        }
+                    }
+                }
+
+                // Empty-Profile Gate
+                if !root.has-profile: Rectangle {
+                    background: #ffffff;
+                    border-radius: 12px;
+                    border-width: 1px;
+                    border-color: #e2e8f0;
+
+                    VerticalLayout {
+                        padding: 28px;
+                        spacing: 14px;
+                        alignment: start;
+
+                        Text {
+                            text: "Chưa có Profile nào";
+                            font-size: 18px;
+                            font-weight: 700;
+                            color: #0f172a;
+                        }
+
+                        Text {
+                            text: "Bạn cần tạo ít nhất một Profile trước khi tạo và quản lý danh sách Macro.";
+                            font-size: 13.5px;
+                            color: #64748b;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            alignment: start;
+
+                            Rectangle {
+                                width: 168px;
+                                height: 40px;
+                                border-radius: 8px;
+                                background: gate-btn.pressed ? #3730a3 : (gate-btn.has-hover ? #4338ca : #4f46e5);
+
+                                Text {
+                                    text: "+ Tạo Profile mới";
+                                    color: #ffffff;
+                                    font-size: 13.5px;
+                                    font-weight: 600;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                gate-btn := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.create-profile(); }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Saved Macros List Table Card
+                if root.has-profile: Rectangle {
+                    background: #ffffff;
+                    border-radius: 12px;
+                    border-width: 1px;
+                    border-color: #e2e8f0;
+
+                    VerticalLayout {
+                        padding: 24px;
+                        spacing: 14px;
+
+                        HorizontalLayout {
+                            alignment: space-between;
+                            spacing: 12px;
+
+                            Text {
+                                text: "Danh sách Macro — " + root.active-profile-name;
+                                font-size: 16px;
+                                font-weight: 700;
+                                color: #0f172a;
+                                vertical-alignment: center;
+                            }
+
+                            Text {
+                                text: root.saved-macros.length + " macro";
+                                font-size: 12.5px;
+                                font-weight: 600;
+                                color: #64748b;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Rectangle {
+                            border-radius: 8px;
+                            border-width: 1px;
+                            border-color: #e2e8f0;
+                            clip: true;
+
+                            VerticalLayout {
+                                spacing: 0px;
+
+                                // Table Header
+                                Rectangle {
+                                    height: 38px;
+                                    background: #f8fafc;
+
+                                    HorizontalLayout {
+                                        padding-left: 14px;
+                                        padding-right: 14px;
+                                        spacing: 12px;
+
+                                        Text {
+                                            text: "Tên Macro";
+                                            horizontal-stretch: 28;
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            color: #64748b;
+                                            vertical-alignment: center;
+                                        }
+
+                                        Text {
+                                            text: "Hotkey & Chế độ";
+                                            horizontal-stretch: 36;
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            color: #64748b;
+                                            vertical-alignment: center;
+                                        }
+
+                                        Text {
+                                            text: "Timeline";
+                                            horizontal-stretch: 20;
+                                            font-size: 13px;
+                                            font-weight: 600;
+                                            color: #64748b;
+                                            vertical-alignment: center;
+                                        }
+
+                                        Rectangle {
+                                            width: 168px;
+                                        }
+                                    }
+                                }
+
+                                // Empty state
+                                if root.saved-macros.length == 0: VerticalLayout {
+                                    spacing: 0px;
+
+                                    Rectangle {
+                                        height: 1px;
+                                        background: #e2e8f0;
+                                    }
+
+                                    Rectangle {
+                                        height: 92px;
+                                        background: #ffffff;
+
+                                        HorizontalLayout {
+                                            padding-left: 18px;
+                                            padding-right: 18px;
+                                            spacing: 16px;
+                                            alignment: space-between;
+
+                                            VerticalLayout {
+                                                spacing: 4px;
+                                                alignment: center;
+                                                horizontal-stretch: 1;
+
+                                                Text {
+                                                    text: "Chưa có macro nào được cấu hình cho profile hiện tại.";
+                                                    font-size: 13.5px;
+                                                    font-weight: 600;
+                                                    color: #1e293b;
+                                                }
+
+                                                Text {
+                                                    text: "Bấm 'Tạo Macro' để mở cửa sổ thiết kế Timeline đa track với đầy đủ công cụ phím/chuột.";
+                                                    font-size: 12.5px;
+                                                    color: #64748b;
+                                                    wrap: word-wrap;
+                                                }
+                                            }
+
+                                            Rectangle {
+                                                width: 148px;
+                                                height: 36px;
+                                                y: (parent.height - self.height) / 2;
+                                                border-radius: 8px;
+                                                background: empty-create-touch.pressed ? #3730a3 : (empty-create-touch.has-hover ? #4338ca : #4f46e5);
+
+                                                Text {
+                                                    text: "+ Tạo Macro";
+                                                    font-size: 13px;
+                                                    font-weight: 600;
+                                                    color: #ffffff;
+                                                    horizontal-alignment: center;
+                                                    vertical-alignment: center;
+                                                }
+
+                                                empty-create-touch := TouchArea {
+                                                    mouse-cursor: pointer;
+                                                    clicked => { root.new-macro(); }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Saved Macro Rows
+                                for mac[idx] in root.saved-macros: VerticalLayout {
+                                    spacing: 0px;
+
+                                    Rectangle {
+                                        height: 1px;
+                                        background: #e2e8f0;
+                                    }
+
+                                    Rectangle {
+                                        height: 46px;
+                                        background: #ffffff;
+
+                                        HorizontalLayout {
+                                            padding-left: 14px;
+                                            padding-right: 14px;
+                                            spacing: 12px;
+
+                                            Text {
+                                                text: mac.name;
+                                                horizontal-stretch: 28;
+                                                font-size: 13.5px;
+                                                font-weight: 600;
+                                                color: #0f172a;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+
+                                            Text {
+                                                text: mac.trigger-label;
+                                                horizontal-stretch: 36;
+                                                font-size: 13px;
+                                                color: #4f46e5;
+                                                font-weight: 600;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+
+                                            Text {
+                                                text: mac.clip-count + " clip · " + mac.total-ms + " ms";
+                                                horizontal-stretch: 20;
+                                                font-size: 12.5px;
+                                                color: #475569;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+
+                                            HorizontalLayout {
+                                                width: 168px;
+                                                spacing: 8px;
+                                                alignment: end;
+
+                                                Rectangle {
+                                                    width: 92px;
+                                                    height: 28px;
+                                                    y: (parent.height - self.height) / 2;
+                                                    border-radius: 6px;
+                                                    border-width: 1px;
+                                                    border-color: #c7d2fe;
+                                                    background: edit-m-touch.has-hover ? #eef2ff : #ffffff;
+
+                                                    Text {
+                                                        text: "Chỉnh sửa";
+                                                        font-size: 12px;
+                                                        font-weight: 600;
+                                                        color: #4f46e5;
+                                                        horizontal-alignment: center;
+                                                        vertical-alignment: center;
+                                                    }
+
+                                                    edit-m-touch := TouchArea {
+                                                        mouse-cursor: pointer;
+                                                        clicked => { root.load-saved-macro(idx); }
+                                                    }
+                                                }
+
+                                                Rectangle {
+                                                    width: 64px;
+                                                    height: 28px;
+                                                    y: (parent.height - self.height) / 2;
+                                                    border-radius: 6px;
+                                                    border-width: 1px;
+                                                    border-color: #f3c6c6;
+                                                    background: del-m-touch.pressed ? #fee2e2 : (del-m-touch.has-hover ? #fef2f2 : #ffffff);
+
+                                                    Text {
+                                                        text: "Xoá";
+                                                        font-size: 12px;
+                                                        font-weight: 600;
+                                                        color: #b91c1c;
+                                                        horizontal-alignment: center;
+                                                        vertical-alignment: center;
+                                                    }
+
+                                                    del-m-touch := TouchArea {
+                                                        mouse-cursor: pointer;
+                                                        clicked => { root.delete-saved-macro(idx); }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // =========================================================================
+            // VIEW B: CREATE / EDIT MACRO NLE STUDIO (Opens when "+ Tạo Macro" clicked)
+            // =========================================================================
+            if root.editor-open: VerticalLayout {
+                spacing: 16px;
+                alignment: start;
+
+                // 1. Studio Header with Back button + Import/Export + New Macro
+                HorizontalLayout {
+                    spacing: 16px;
+                    alignment: space-between;
+
+                    VerticalLayout {
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: "CTT MACRO STUDIO / MULTI-TRACK NLE";
+                            font-size: 11px;
+                            font-weight: 800;
+                            letter-spacing: 1.3px;
+                            color: #0d9488;
+                        }
+
+                        Text {
+                            text: "Tạo & Chỉnh sửa Macro";
+                            font-size: 26px;
+                            font-weight: 700;
+                            color: #0f172a;
+                        }
+
+                        Text {
+                            text: "Xếp phím và chuột thành clip trên nhiều track song song như Premiere: kéo để dời, kéo 2 mép để chỉnh thời gian giữ, đặt vùng lặp I/O.";
+                            font-size: 13px;
+                            color: #64748b;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: end;
+
+                        // Back to Macro List button
+                        Rectangle {
+                            height: 38px;
+                            min-width: 152px;
+                            border-radius: 8px;
+                            border-width: 1px;
+                            border-color: back-touch.has-hover ? #4f46e5 : #cbd5e1;
+                            background: back-touch.pressed ? #eef2ff : (back-touch.has-hover ? #f8fafc : #ffffff);
+
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+
+                                Text {
+                                    text: "← Danh sách Macro";
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    color: #1e293b;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                }
+                            }
+
+                            back-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.close-editor(); }
+                            }
+                        }
+
+                        // Import / Export header button
+                        Rectangle {
+                            height: 38px;
+                            min-width: 136px;
+                            border-radius: 8px;
+                            border-width: 1px;
+                            border-color: io-hdr-touch.has-hover ? #4f46e5 : #cbd5e1;
+                            background: io-hdr-touch.pressed ? #eef2ff : (io-hdr-touch.has-hover ? #f8fafc : #ffffff);
+
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+
+                                Text {
+                                    text: "Import / Export";
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    color: #1e293b;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                }
+                            }
+
+                            io-hdr-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.open-io-modal(); }
+                            }
+                        }
+
+                        // Reset / New Macro button
+                        Rectangle {
+                            height: 38px;
+                            min-width: 120px;
+                            border-radius: 8px;
+                            background: new-touch.pressed ? #3730a3 : (new-touch.has-hover ? #4338ca : #4f46e5);
+
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 14px;
+
+                                Text {
+                                    text: "+ Macro mới";
+                                    font-size: 13px;
+                                    font-weight: 600;
+                                    color: #ffffff;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: center;
+                                }
+                            }
+
+                            new-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.new-macro(); }
+                            }
+                        }
+                    }
+                }
+
+                // 3. Main NLE Editor Card (Light Card Frame + Dark Studio Viewport)
+                Rectangle {
+                background: #ffffff;
+                border-radius: 14px;
+                border-width: 1px;
+                border-color: #e2e8f0;
+
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 14px;
+
+                    // 3A. Card Heading
+                    HorizontalLayout {
+                        spacing: 12px;
+                        alignment: space-between;
+
+                        VerticalLayout {
+                            spacing: 2px;
+
+                            Text {
+                                text: "TIMELINE";
+                                font-size: 10.5px;
+                                font-weight: 800;
+                                letter-spacing: 1.1px;
+                                color: #0d9488;
+                            }
+
+                            Text {
+                                text: "Các clip của Macro";
+                                font-size: 17px;
+                                font-weight: 700;
+                                color: #0f172a;
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: end;
+
+                            // Help toggle chip
+                            Rectangle {
+                                height: 28px;
+                                min-width: 96px;
+                                border-radius: 14px;
+                                border-width: 1px;
+                                border-color: root.help-open ? #4f46e5 : #cbd5e1;
+                                background: root.help-open ? #eef2ff : #f8fafc;
+
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+
+                                    Text {
+                                        text: root.help-open ? "▾ Cách dùng" : "▸ Cách dùng";
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: root.help-open ? #4f46e5 : #475569;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.help-open = !root.help-open; }
+                                }
+                            }
+
+                            // Clip count badge
+                            Rectangle {
+                                height: 28px;
+                                min-width: 68px;
+                                border-radius: 14px;
+                                background: #eef2ff;
+                                border-width: 1px;
+                                border-color: #c7d2fe;
+
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+
+                                    Text {
+                                        text: root.clip-count + " clip";
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        color: #4f46e5;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3B. Collapsible Help Drawer
+                    if root.help-open: Rectangle {
+                        background: #f1f5f9;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #e2e8f0;
+
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 4px;
+
+                            Text {
+                                text: "• Kéo thân clip để dời thời gian hoặc đổi track (tự động tránh đè clip cùng track). Kéo 2 mép trái/phải (6px) để chỉnh thời gian giữ.";
+                                font-size: 12px;
+                                color: #334155;
+                                wrap: word-wrap;
+                            }
+
+                            Text {
+                                text: "• Nhấp đúp vào vùng trống để tạo clip phím tại chỗ; nhấp đúp clip phím để đổi phím. Giữ Ctrl+Lăn chuột để Zoom, Alt khi kéo để tạm tắt hít (Snap).";
+                                font-size: 12px;
+                                color: #334155;
+                                wrap: word-wrap;
+                            }
+
+                            Text {
+                                text: "• Phím tắt: Space (Xem thử) · C (Cắt đôi tại đầu phát) · I / O (Đầu/Cuối vùng lặp) · Ctrl+Z/Y/X/C/V/D/A/S · Mũi tên (Dời 1ms, Shift 10ms).";
+                                font-size: 12px;
+                                color: #334155;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+
+                    // Active Capture / Recording Banner
+                    if root.capture-banner != "": Rectangle {
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: root.is-recording ? #ef4444 : #fbbf24;
+                        background: root.is-recording ? #fef2f2 : #fffbeb;
+
+                        HorizontalLayout {
+                            padding: 10px;
+
+                            Text {
+                                text: root.capture-banner;
+                                font-size: 12.5px;
+                                font-weight: 600;
+                                color: root.is-recording ? #b91c1c : #b45309;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+
+                    // 3C. Embedded Dark Studio Frame (#toolbar + #addBar + #nle + #statusBar)
+                    Rectangle {
+                        background: #05080f;
+                        border-radius: 10px;
+                        border-width: 1.5px;
+                        border-color: root.is-recording ? #ef4444 : #1e293b;
+                        clip: true;
+
+                        VerticalLayout {
+                            spacing: 0px;
+
+                            // Toolbar (#toolbar, 19 icon tools + zoom readout)
+                            Rectangle {
+                                height: 44px;
+                                background: #05080f;
+
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 10px;
+                                    spacing: 4px;
+
+                                    // Group 1: Undo / Redo
+                                    ToolIconBtn {
+                                        path-data: "M9 14L4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11";
+                                        tooltip: "Hoàn tác (Ctrl+Z)";
+                                        enabled: root.can-undo;
+                                        clicked => { root.toolbar-action("undo"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+                                    ToolIconBtn {
+                                        path-data: "M15 14l5-5-5-5M20 9H9.5A5.5 5.5 0 0 0 4 14.5v0A5.5 5.5 0 0 0 9.5 20H13";
+                                        tooltip: "Làm lại (Ctrl+Y)";
+                                        enabled: root.can-redo;
+                                        clicked => { root.toolbar-action("redo"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+
+                                    Rectangle { width: 1px; height: 22px; y: 11px; background: #94a3b82e; }
+
+                                    // Group 2: Save / Import-Export
+                                    ToolIconBtn {
+                                        path-data: "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z";
+                                        path-data-2: "M17 21v-8H7v8M7 3v5h8";
+                                        tooltip: "Lưu Macro (Ctrl+S)";
+                                        enabled: !root.is-recording;
+                                        clicked => { root.save-macro(); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+                                    ToolIconBtn {
+                                        path-data: "M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4";
+                                        tooltip: "Import / Export chuỗi lệnh Macro (import.md)";
+                                        enabled: !root.is-recording;
+                                        clicked => { root.open-io-modal(); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+
+                                    Rectangle { width: 1px; height: 22px; y: 11px; background: #94a3b82e; }
+
+                                    // Group 3: Cut / Copy / Paste / Duplicate
+                                    ToolIconBtn {
+                                        path-data: "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm14-14L8.12 15.88M14.47 14.48L20 20M8.12 8.12L12 12";
+                                        tooltip: "Cắt (Ctrl+X)";
+                                        enabled: !root.is-recording && root.selected-count > 0;
+                                        clicked => { root.toolbar-action("cut"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+                                    ToolIconBtn {
+                                        path-data: "M9 9h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z";
+                                        path-data-2: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1";
+                                        tooltip: "Copy (Ctrl+C)";
+                                        enabled: !root.is-recording && root.selected-count > 0;
+                                        clicked => { root.toolbar-action("copy"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+                                    ToolIconBtn {
+                                        path-data: "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2";
+                                        path-data-2: "M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z";
+                                        tooltip: "Dán tại đầu phát (Ctrl+V)";
+                                        enabled: !root.is-recording;
+                                        clicked => { root.toolbar-action("paste"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+                                    ToolIconBtn {
+                                        path-data: "M8 8h12v12H8z";
+                                        path-data-2: "M16 8V4H4v12h4";
+                                        tooltip: "Nhân đôi ngay phía sau (Ctrl+D)";
+                                        enabled: !root.is-recording && root.selected-count > 0;
+                                        clicked => { root.toolbar-action("dup"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+
+                                    Rectangle { width: 1px; height: 22px; y: 11px; background: #94a3b82e; }
+
+                                    // Group 4: Razor / Delete / Clear
+                                    ToolIconBtn {
+                                        path-data: "M12 2v20M5 7h14v10H5z";
+                                        tooltip: "Cắt đôi clip tại đầu phát (C)";
+                                        enabled: root.can-razor;
+                                        clicked => { root.toolbar-action("razor"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+                                    ToolIconBtn {
+                                        path-data: "M3 6h18M8 6V4h8v2m-9 0v14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V6";
+                                        tooltip: "Xoá clip đã chọn (Delete)";
+                                        enabled: !root.is-recording && root.selected-count > 0;
+                                        danger: true;
+                                        clicked => { root.toolbar-action("delete"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+                                    ToolIconBtn {
+                                        path-data: "M4 6h16M10 11l4 4m0-4l-4 4M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6";
+                                        tooltip: "Xoá hết timeline";
+                                        enabled: !root.is-recording && (root.clip-count > 0 || root.has-loop);
+                                        danger: true;
+                                        clicked => { root.toolbar-action("clear"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+
+                                    Rectangle { width: 1px; height: 22px; y: 11px; background: #94a3b82e; }
+
+                                    // Group 5: Loop In / Loop Out / Loop Off
+                                    ToolIconBtn {
+                                        path-data: "M9 4H6v16h3M19 12h-8m0 0l3-3m-3 3l3 3";
+                                        tooltip: "Đặt đầu vùng lặp tại đầu phát (I)";
+                                        enabled: !root.is-recording;
+                                        clicked => { root.toolbar-action("loop_in"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+                                    ToolIconBtn {
+                                        path-data: "M15 4h3v16h-3M5 12h8m0 0l-3-3m3 3l-3 3";
+                                        tooltip: "Đặt cuối vùng lặp tại đầu phát (O)";
+                                        enabled: !root.is-recording;
+                                        clicked => { root.toolbar-action("loop_out"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+                                    ToolIconBtn {
+                                        path-data: "M17 2l4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M3 3l18 18";
+                                        tooltip: "Bỏ vùng lặp";
+                                        enabled: !root.is-recording && root.has-loop;
+                                        clicked => { root.toolbar-action("loop_off"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+
+                                    Rectangle { width: 1px; height: 22px; y: 11px; background: #94a3b82e; }
+
+                                    // Group 6: Play / Record
+                                    ToolIconBtn {
+                                        path-data: root.is-playing ? "M7 5h3v14H7zM14 5h3v14h-3z" : "M7 5l12 7-12 7V5z";
+                                        tooltip: "Xem thử đầu phát chạy (Space)";
+                                        enabled: !root.is-recording && root.clip-count > 0;
+                                        active: root.is-playing;
+                                        clicked => { root.toolbar-action("play"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+                                    ToolIconBtn {
+                                        path-data: root.is-recording ? "M7 7h10v10H7z" : "M12 6a6 6 0 1 0 0 12 6 6 0 1 0 0-12z";
+                                        tooltip: "Ghi trực tiếp: bấm rồi thao tác bàn phím / chuột trên timeline";
+                                        enabled: true;
+                                        recording-pulse: root.is-recording;
+                                        danger: !root.is-recording;
+                                        clicked => {
+                                            canvas-focus.focus();
+                                            root.toolbar-action("record");
+                                        }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+
+                                    Rectangle { width: 1px; height: 22px; y: 11px; background: #94a3b82e; }
+
+                                    // Group 7: Snap / Zoom- / Zoom+ / Fit
+                                    ToolIconBtn {
+                                        path-data: "M6 15v-3a6 6 0 1 1 12 0v3M6 15h4v4H6zm8 0h4v4h-4z";
+                                        tooltip: "Hít vào mép clip / đầu phát khi kéo (giữ Alt để tạm tắt)";
+                                        enabled: !root.is-recording;
+                                        active: root.snap-enabled;
+                                        clicked => { root.toolbar-action("snap"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+                                    ToolIconBtn {
+                                        path-data: "M11 4a7 7 0 1 0 0 14 7 7 0 1 0 0-14zM21 21l-4.35-4.35M8 11h6";
+                                        tooltip: "Thu nhỏ (-)";
+                                        enabled: !root.is-recording;
+                                        clicked => { root.toolbar-action("zoom_out"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+                                    ToolIconBtn {
+                                        path-data: "M11 4a7 7 0 1 0 0 14 7 7 0 1 0 0-14zM21 21l-4.35-4.35M11 8v6M8 11h6";
+                                        tooltip: "Phóng to (+)";
+                                        enabled: !root.is-recording;
+                                        clicked => { root.toolbar-action("zoom_in"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+                                    ToolIconBtn {
+                                        path-data: "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5";
+                                        tooltip: "Vừa khung";
+                                        enabled: !root.is-recording;
+                                        clicked => { root.toolbar-action("fit"); }
+                                        hovered-changed(t) => { root.hover-tooltip = t; }
+                                    }
+
+                                    Rectangle { horizontal-stretch: 1; }
+
+                                    if root.hover-tooltip != "": Text {
+                                        text: root.hover-tooltip;
+                                        font-size: 11.5px;
+                                        color: #2dd4bf;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+
+                                    Text {
+                                        text: root.zoom-label;
+                                        font-size: 11.5px;
+                                        font-weight: 600;
+                                        color: #8fa0ba;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            Rectangle { height: 1px; background: #94a3b82e; }
+
+                            // Quick Insert Bar (#addBar)
+                            Rectangle {
+                                height: 42px;
+                                background: #05080f;
+
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    spacing: 6px;
+
+                                    AddChipBtn {
+                                        label: "+ Phím";
+                                        enabled: !root.is-recording;
+                                        accent-border: #2dd4bf88;
+                                        accent-text: #2dd4bf;
+                                        clicked => {
+                                            canvas-focus.focus();
+                                            root.insert-key-clip();
+                                        }
+                                    }
+
+                                    AddChipBtn {
+                                        label: "+ LC";
+                                        enabled: !root.is-recording;
+                                        accent-border: #a78bfa88;
+                                        accent-text: #c4b5fd;
+                                        clicked => { root.insert-mouse-clip(0); }
+                                    }
+
+                                    AddChipBtn {
+                                        label: "+ RC";
+                                        enabled: !root.is-recording;
+                                        accent-border: #60a5fa88;
+                                        accent-text: #93c5fd;
+                                        clicked => { root.insert-mouse-clip(1); }
+                                    }
+
+                                    AddChipBtn {
+                                        label: "+ MC";
+                                        enabled: !root.is-recording;
+                                        accent-border: #a78bfa66;
+                                        accent-text: #c4b5fd;
+                                        clicked => { root.insert-mouse-clip(2); }
+                                    }
+
+                                    AddChipBtn {
+                                        label: "+ M3";
+                                        enabled: !root.is-recording;
+                                        accent-border: #a78bfa66;
+                                        accent-text: #c4b5fd;
+                                        clicked => { root.insert-mouse-clip(3); }
+                                    }
+
+                                    AddChipBtn {
+                                        label: "+ M4";
+                                        enabled: !root.is-recording;
+                                        accent-border: #a78bfa66;
+                                        accent-text: #c4b5fd;
+                                        clicked => { root.insert-mouse-clip(4); }
+                                    }
+
+                                    Rectangle { width: 1px; height: 20px; y: 11px; background: #94a3b82e; }
+
+                                    AddChipBtn {
+                                        label: "K.trống";
+                                        enabled: !root.is-recording;
+                                        clicked => { root.insert-gap(root.gap-input-text); }
+                                    }
+
+                                    Rectangle {
+                                        width: 64px;
+                                        height: 28px;
+                                        border-radius: 6px;
+                                        border-width: 1px;
+                                        border-color: #94a3b838;
+                                        background: #0b111d;
+
+                                        TextInput {
+                                            x: 6px;
+                                            y: 4px;
+                                            width: parent.width - 12px;
+                                            height: parent.height - 8px;
+                                            text <=> root.gap-input-text;
+                                            color: #e7edf8;
+                                            font-size: 12px;
+                                            horizontal-alignment: right;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "ms";
+                                        font-size: 11.5px;
+                                        color: #8fa0ba;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Rectangle { width: 1px; height: 20px; y: 11px; background: #94a3b82e; }
+
+                                    AddChipBtn {
+                                        label: "+ Track";
+                                        enabled: !root.is-recording;
+                                        clicked => { root.toolbar-action("add_track"); }
+                                    }
+
+                                    Rectangle { horizontal-stretch: 1; }
+                                }
+                            }
+
+                            Rectangle { height: 1px; background: #94a3b82e; }
+
+                            // NLE Multi-Track Viewport (#nle)
+                            canvas-viewport := Rectangle {
+                                height: 340px;
+                                background: #060a12;
+                                clip: true;
+
+                                changed width => {
+                                    root.canvas-resized(self.width / 1px, self.height / 1px);
+                                }
+                                changed height => {
+                                    root.canvas-resized(self.width / 1px, self.height / 1px);
+                                }
+
+                                canvas-focus := FocusScope {
+                                    width: 100%;
+                                    height: 100%;
+
+                                    key-pressed(event) => {
+                                        root.canvas-key-pressed(
+                                            event.text,
+                                            event.repeat,
+                                            event.modifiers.control,
+                                            event.modifiers.shift,
+                                            event.modifiers.alt
+                                        );
+                                        EventResult.accept
+                                    }
+
+                                    key-released(event) => {
+                                        root.canvas-key-released(event.text);
+                                        EventResult.accept
+                                    }
+
+                                    canvas-touch := TouchArea {
+                                        width: 100%;
+                                        height: 100%;
+                                        mouse-cursor: root.hover-resize ? ew-resize : default;
+
+                                        pointer-event(event) => {
+                                            if event.kind == PointerEventKind.down {
+                                                canvas-focus.focus();
+                                                root.canvas-pointer-down(
+                                                    self.mouse-x / 1px,
+                                                    self.mouse-y / 1px,
+                                                    event.button == PointerEventButton.left ? 0 :
+                                                    (event.button == PointerEventButton.right ? 1 :
+                                                    (event.button == PointerEventButton.middle ? 2 :
+                                                    (event.button == PointerEventButton.back ? 3 :
+                                                    (event.button == PointerEventButton.forward ? 4 : 5)))),
+                                                    event.modifiers.control,
+                                                    event.modifiers.shift,
+                                                    event.modifiers.alt
+                                                );
+                                            } else if event.kind == PointerEventKind.move {
+                                                root.canvas-pointer-move(
+                                                    self.mouse-x / 1px,
+                                                    self.mouse-y / 1px,
+                                                    event.modifiers.alt
+                                                );
+                                            } else if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel {
+                                                root.canvas-pointer-up(
+                                                    event.button == PointerEventButton.left ? 0 :
+                                                    (event.button == PointerEventButton.right ? 1 :
+                                                    (event.button == PointerEventButton.middle ? 2 :
+                                                    (event.button == PointerEventButton.back ? 3 :
+                                                    (event.button == PointerEventButton.forward ? 4 : 5)))),
+                                                    event.modifiers.control,
+                                                    event.modifiers.shift,
+                                                    event.modifiers.alt
+                                                );
+                                            }
+                                        }
+
+                                        double-clicked => {
+                                            canvas-focus.focus();
+                                            root.canvas-double-click(self.mouse-x / 1px, self.mouse-y / 1px, false);
+                                        }
+
+                                        scroll-event(event) => {
+                                            root.canvas-wheel(
+                                                self.mouse-x / 1px,
+                                                event.delta-x / 1px,
+                                                event.delta-y / 1px,
+                                                event.modifiers.control,
+                                                event.modifiers.shift
+                                            );
+                                            EventResult.accept
+                                        }
+                                    }
+                                }
+
+                                // LAYER 1-4: Track Lanes, Loop Shade, Clips, Snap Line, Marquee (Clipped to [HEAD_W.., RULER_H..])
+                                Rectangle {
+                                    x: 58px;
+                                    y: 28px;
+                                    width: parent.width - 58px;
+                                    height: parent.height - 28px;
+                                    clip: true;
+
+                                    // Layer 1: Track Lanes
+                                    for th in root.track-headers: Rectangle {
+                                        x: 0px;
+                                        y: th.y - 28px;
+                                        width: parent.width;
+                                        height: 38px;
+                                        background: th.active ? #2dd4bf0f : transparent;
+
+                                        Rectangle {
+                                            x: 0px;
+                                            y: parent.height - 1px;
+                                            width: parent.width;
+                                            height: 1px;
+                                            background: #94a3b814;
+                                        }
+                                    }
+
+                                    // Layer 2: Loop Shade Overlay
+                                    if root.has-loop-overlay: Rectangle {
+                                        x: root.loop-x - 58px;
+                                        y: 0px;
+                                        width: root.loop-width;
+                                        height: parent.height;
+                                        background: #facc150f;
+
+                                        Rectangle {
+                                            x: 0px;
+                                            y: 0px;
+                                            width: 1px;
+                                            height: parent.height;
+                                            background: #facc158c;
+                                        }
+
+                                        Rectangle {
+                                            x: parent.width - 1px;
+                                            y: 0px;
+                                            width: 1px;
+                                            height: parent.height;
+                                            background: #facc158c;
+                                        }
+                                    }
+
+                                    // Layer 3: Clips
+                                    for clip in root.clips: Rectangle {
+                                        x: clip.x - 58px;
+                                        y: clip.y - 28px;
+                                        width: clip.width;
+                                        height: clip.height;
+                                        border-radius: 5px;
+                                        border-width: clip.clashing ? 2px : (clip.selected ? 1.5px : 1px);
+                                        border-color: clip.clashing
+                                            ? #fb7185
+                                            : (clip.selected
+                                                ? #ffffff
+                                                : (clip.kind-tag == 3
+                                                    ? #fda4af
+                                                    : (clip.kind-tag == 2
+                                                        ? #60a5facc
+                                                        : (clip.kind-tag == 1 ? #a78bfacc : #2dd4bfcc))));
+                                        background: clip.kind-tag == 3
+                                            ? #1e293b
+                                            : (clip.kind-tag == 2
+                                                ? @linear-gradient(180deg, #3b82f69e 0%, #1e40afb8 100%)
+                                                : (clip.kind-tag == 1
+                                                    ? @linear-gradient(180deg, #8b5cf69e 0%, #5b21b6b8 100%)
+                                                    : @linear-gradient(180deg, #14b8a69e 0%, #0f766eb8 100%)));
+                                        clip: true;
+
+                                        // Live playback highlight overlay
+                                        if clip.live: Rectangle {
+                                            width: 100%;
+                                            height: 100%;
+                                            background: #ffffff38;
+                                        }
+
+                                        // Selected edge trim handles (4px left & right)
+                                        if clip.selected && clip.width > 12px: Rectangle {
+                                            x: 0px;
+                                            y: 0px;
+                                            width: 4px;
+                                            height: parent.height;
+                                            background: #ffffff59;
+                                        }
+                                        if clip.selected && clip.width > 12px: Rectangle {
+                                            x: parent.width - 4px;
+                                            y: 0px;
+                                            width: 4px;
+                                            height: parent.height;
+                                            background: #ffffff59;
+                                        }
+
+                                        if clip.label != "": HorizontalLayout {
+                                            padding-left: 6px;
+                                            padding-right: 6px;
+                                            spacing: 4px;
+
+                                            Text {
+                                                text: clip.label;
+                                                font-size: 12px;
+                                                font-weight: 700;
+                                                color: clip.kind-tag == 3
+                                                    ? #fecdd3
+                                                    : (clip.kind-tag == 0 ? #ecfffb : #f3efff);
+                                                vertical-alignment: center;
+                                                horizontal-stretch: 1;
+                                                overflow: elide;
+                                            }
+
+                                            if clip.dur-text != "": Text {
+                                                text: clip.dur-text;
+                                                font-size: 10.5px;
+                                                color: #e2e8f0bf;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                    }
+
+                                    // Layer 4A: Magnetic Snap Guide Line
+                                    if root.show-snap-guide: Rectangle {
+                                        x: root.snap-guide-x - 58px;
+                                        y: 0px;
+                                        width: 1px;
+                                        height: parent.height;
+                                        background: #facc15e6;
+                                    }
+
+                                    // Layer 4B: Marquee Selection Box
+                                    if root.show-marquee: Rectangle {
+                                        x: root.marquee-x - 58px;
+                                        y: root.marquee-y - 28px;
+                                        width: root.marquee-width;
+                                        height: root.marquee-height;
+                                        border-width: 1px;
+                                        border-color: #67e8f9cc;
+                                        background: #67e8f91a;
+                                    }
+
+                                    // Layer 4C: Empty Hint Overlay
+                                    if root.clip-count == 0: Text {
+                                        x: 14px;
+                                        y: 12px;
+                                        text: "Timeline trống: bấm + Phím / + LC / + RC ở trên, nhấp đúp vào track, hoặc bấm nút Ghi (●).";
+                                        font-size: 12.5px;
+                                        color: #8fa0ba;
+                                    }
+                                }
+
+                                // LAYER 5: Sticky Left Track Headers (0..58px, 28px..)
+                                Rectangle {
+                                    x: 0px;
+                                    y: 28px;
+                                    width: 58px;
+                                    height: parent.height - 28px;
+                                    background: #0b111d;
+                                    clip: true;
+
+                                    for th in root.track-headers: Rectangle {
+                                        x: 0px;
+                                        y: th.y - 28px;
+                                        width: 58px;
+                                        height: 38px;
+                                        background: th.active ? #2dd4bf14 : transparent;
+
+                                        Text {
+                                            x: 8px;
+                                            y: 0px;
+                                            width: 30px;
+                                            height: 38px;
+                                            text: th.label;
+                                            font-size: 12px;
+                                            font-weight: 700;
+                                            color: th.active ? #2dd4bf : #9fb0c8;
+                                            vertical-alignment: center;
+                                        }
+
+                                        if th.can-delete: Text {
+                                            x: 38px;
+                                            y: 10px;
+                                            width: 16px;
+                                            height: 18px;
+                                            text: "×";
+                                            font-size: 13px;
+                                            font-weight: 700;
+                                            color: #fb7185;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+
+                                        Rectangle {
+                                            x: 0px;
+                                            y: parent.height - 1px;
+                                            width: 58px;
+                                            height: 1px;
+                                            background: #94a3b814;
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        x: parent.width - 1px;
+                                        y: 0px;
+                                        width: 1px;
+                                        height: parent.height;
+                                        background: #94a3b82e;
+                                    }
+                                }
+
+                                // LAYER 6: Sticky Top Ruler (58px.., 0..28px)
+                                Rectangle {
+                                    x: 58px;
+                                    y: 0px;
+                                    width: parent.width - 58px;
+                                    height: 28px;
+                                    background: #0b111d;
+                                    clip: true;
+
+                                    for tick in root.ruler-ticks: Rectangle {
+                                        x: tick.x - 58px;
+                                        y: tick.is-major ? 16px : 22px;
+                                        width: 1px;
+                                        height: tick.is-major ? 11px : 5px;
+                                        background: tick.is-major ? #94a3b8b3 : #94a3b859;
+                                    }
+
+                                    for tick in root.ruler-ticks: Text {
+                                        visible: tick.is-major && tick.label != "";
+                                        x: tick.x - 58px + 3px;
+                                        y: 3px;
+                                        text: tick.label;
+                                        font-size: 10.5px;
+                                        color: #8fa0ba;
+                                    }
+
+                                    // Loop Bar + Left/Right Handles on Ruler
+                                    if root.has-loop-overlay: Rectangle {
+                                        x: root.loop-x - 58px;
+                                        y: 2px;
+                                        width: root.loop-width;
+                                        height: 8px;
+                                        border-radius: 3px;
+                                        background: #facc15bf;
+                                    }
+                                    if root.has-loop-overlay: Rectangle {
+                                        x: root.loop-x - 58px - 4px;
+                                        y: 0px;
+                                        width: 8px;
+                                        height: 13px;
+                                        border-radius: 2px;
+                                        background: #facc15;
+                                    }
+                                    if root.has-loop-overlay: Rectangle {
+                                        x: root.loop-x + root.loop-width - 58px - 4px;
+                                        y: 0px;
+                                        width: 8px;
+                                        height: 13px;
+                                        border-radius: 2px;
+                                        background: #facc15;
+                                    }
+
+                                    Rectangle {
+                                        x: 0px;
+                                        y: parent.height - 1px;
+                                        width: parent.width;
+                                        height: 1px;
+                                        background: #94a3b82e;
+                                    }
+                                }
+
+                                // LAYER 6B: Sticky Top-Left "ms" Corner
+                                Rectangle {
+                                    x: 0px;
+                                    y: 0px;
+                                    width: 58px;
+                                    height: 28px;
+                                    background: #0b111d;
+
+                                    Text {
+                                        text: "ms";
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        color: #8fa0ba;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Rectangle {
+                                        x: 57px;
+                                        y: 0px;
+                                        width: 1px;
+                                        height: 28px;
+                                        background: #94a3b82e;
+                                    }
+
+                                    Rectangle {
+                                        x: 0px;
+                                        y: 27px;
+                                        width: 58px;
+                                        height: 1px;
+                                        background: #94a3b82e;
+                                    }
+                                }
+
+                                // LAYER 7: Red Playhead Line + Inverted Triangle
+                                Rectangle {
+                                    x: 58px;
+                                    y: 0px;
+                                    width: parent.width - 58px;
+                                    height: parent.height;
+                                    clip: true;
+
+                                    Rectangle {
+                                        x: root.playhead-x - 58px - 1px;
+                                        y: 0px;
+                                        width: 2px;
+                                        height: parent.height;
+                                        background: #f43f5e;
+                                    }
+
+                                    Path {
+                                        x: root.playhead-x - 58px - 6px;
+                                        y: 0px;
+                                        width: 12px;
+                                        height: 8px;
+                                        viewbox-x: 0;
+                                        viewbox-y: 0;
+                                        viewbox-width: 12;
+                                        viewbox-height: 8;
+                                        commands: "M 0 0 L 12 0 L 6 8 Z";
+                                        fill: #f43f5e;
+                                    }
+                                }
+                            }
+
+                            Rectangle { height: 1px; background: #94a3b82e; }
+
+                            // Studio Status Bar (#statusBar)
+                            Rectangle {
+                                height: 36px;
+                                background: #05080f;
+
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 12px;
+
+                                    Text {
+                                        text: "Đầu phát:";
+                                        font-size: 12px;
+                                        color: #8fa0ba;
+                                        vertical-alignment: center;
+                                    }
+
+                                    Rectangle {
+                                        width: 68px;
+                                        height: 24px;
+                                        border-radius: 5px;
+                                        border-width: 1px;
+                                        border-color: #94a3b838;
+                                        background: #0b111d;
+
+                                        TextInput {
+                                            x: 6px;
+                                            y: 2px;
+                                            width: parent.width - 12px;
+                                            height: parent.height - 4px;
+                                            text <=> root.playhead-input-text;
+                                            color: #e7edf8;
+                                            font-size: 12px;
+                                            horizontal-alignment: right;
+                                            vertical-alignment: center;
+                                            accepted => { root.set-playhead-text(self.text); }
+                                            changed has-focus => {
+                                                if !self.has-focus {
+                                                    root.set-playhead-text(self.text);
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "ms   ·   Tổng: " + root.total-ms + " ms   ·   Track chèn: " + root.active-track-label + "   ·   " + root.loop-status-text;
+                                        font-size: 12px;
+                                        color: #8fa0ba;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 4. Dynamic Clip Inspector (Light Card inside Editor Card)
+                    if root.inspector-visible: Rectangle {
+                        background: #f8fafc;
+                        border-radius: 10px;
+                        border-width: 1px;
+                        border-color: #cbd5e1;
+
+                        VerticalLayout {
+                            padding: 14px;
+                            spacing: 12px;
+
+                            Text {
+                                text: root.inspector-title;
+                                font-size: 14px;
+                                font-weight: 700;
+                                color: #0f172a;
+                            }
+
+                            // Single-clip inspector controls
+                            if !root.inspector-multi: VerticalLayout {
+                                spacing: 10px;
+
+                                HorizontalLayout {
+                                    spacing: 12px;
+
+                                    Text {
+                                        text: root.inspector-is-key ? "Phím:" : "Nút chuột:";
+                                        width: 82px;
+                                        font-size: 13px;
+                                        font-weight: 600;
+                                        color: #1e293b;
+                                        vertical-alignment: center;
+                                    }
+
+                                    if root.inspector-is-key: Rectangle {
+                                        width: 220px;
+                                        height: 34px;
+                                        border-radius: 7px;
+                                        border-width: 1px;
+                                        border-color: root.is-capturing-key ? #fbbf24 : #4f46e5;
+                                        background: root.is-capturing-key ? #fffbeb : #eef2ff;
+
+                                        Text {
+                                            text: root.is-capturing-key ? "Đang chờ bấm phím..." : (root.inspector-key-label + "  (Bấm để đổi)");
+                                            font-size: 12.5px;
+                                            font-weight: 600;
+                                            color: root.is-capturing-key ? #b45309 : #4f46e5;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+
+                                        TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => {
+                                                canvas-focus.focus();
+                                                root.inspector-capture-key();
+                                            }
+                                        }
+                                    }
+
+                                    if !root.inspector-is-key: VerticalLayout {
+                                        spacing: 4px;
+                                        horizontal-stretch: 1;
+
+                                        Rectangle {
+                                            height: 34px;
+                                            border-radius: 7px;
+                                            border-width: 1px;
+                                            border-color: root.inspector-mouse-open ? #4f46e5 : #cbd5e1;
+                                            background: #ffffff;
+
+                                            HorizontalLayout {
+                                                padding-left: 12px;
+                                                padding-right: 12px;
+
+                                                Text {
+                                                    text: (root.inspector-mouse-idx >= 0 && root.inspector-mouse-idx < root.mouse-button-names.length)
+                                                        ? root.mouse-button-names[root.inspector-mouse-idx]
+                                                        : "Chuột";
+                                                    font-size: 13px;
+                                                    color: #0f172a;
+                                                    vertical-alignment: center;
+                                                    horizontal-stretch: 1;
+                                                }
+
+                                                Text {
+                                                    text: root.inspector-mouse-open ? "▴" : "▾";
+                                                    font-size: 12px;
+                                                    color: #475569;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+
+                                            TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.inspector-mouse-open = !root.inspector-mouse-open; }
+                                            }
+                                        }
+
+                                        if root.inspector-mouse-open: Rectangle {
+                                            background: #ffffff;
+                                            border-radius: 7px;
+                                            border-width: 1px;
+                                            border-color: #cbd5e1;
+                                            clip: true;
+
+                                            VerticalLayout {
+                                                for mname[midx] in root.mouse-button-names: Rectangle {
+                                                    height: 32px;
+                                                    background: midx == root.inspector-mouse-idx ? #eef2ff : (mtouch.has-hover ? #f8fafc : #ffffff);
+
+                                                    HorizontalLayout {
+                                                        padding-left: 12px;
+                                                        padding-right: 12px;
+                                                        Text {
+                                                            text: mname;
+                                                            font-size: 12.5px;
+                                                            color: midx == root.inspector-mouse-idx ? #4f46e5 : #1e293b;
+                                                            vertical-alignment: center;
+                                                        }
+                                                    }
+
+                                                    mtouch := TouchArea {
+                                                        mouse-cursor: pointer;
+                                                        clicked => {
+                                                            root.inspector-mouse-open = false;
+                                                            root.inspector-select-mouse(midx);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 12px;
+
+                                    VerticalLayout {
+                                        spacing: 4px;
+                                        horizontal-stretch: 1;
+                                        Text { text: "Bắt đầu (ms)"; font-size: 11.5px; color: #64748b; }
+                                        LineEdit {
+                                            text <=> root.inspector-start-text;
+                                            accepted => {
+                                                root.inspector-commit-single(
+                                                    root.inspector-start-text,
+                                                    root.inspector-dur-text,
+                                                    root.inspector-end-text,
+                                                    root.inspector-track-text,
+                                                    0
+                                                );
+                                            }
+                                            changed has-focus => {
+                                                if !self.has-focus {
+                                                    root.inspector-commit-single(
+                                                        root.inspector-start-text,
+                                                        root.inspector-dur-text,
+                                                        root.inspector-end-text,
+                                                        root.inspector-track-text,
+                                                        0
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        spacing: 4px;
+                                        horizontal-stretch: 1;
+                                        Text { text: "Giữ trong (ms)"; font-size: 11.5px; color: #64748b; }
+                                        LineEdit {
+                                            text <=> root.inspector-dur-text;
+                                            accepted => {
+                                                root.inspector-commit-single(
+                                                    root.inspector-start-text,
+                                                    root.inspector-dur-text,
+                                                    root.inspector-end-text,
+                                                    root.inspector-track-text,
+                                                    1
+                                                );
+                                            }
+                                            changed has-focus => {
+                                                if !self.has-focus {
+                                                    root.inspector-commit-single(
+                                                        root.inspector-start-text,
+                                                        root.inspector-dur-text,
+                                                        root.inspector-end-text,
+                                                        root.inspector-track-text,
+                                                        1
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        spacing: 4px;
+                                        horizontal-stretch: 1;
+                                        Text { text: "Nhả lúc (ms)"; font-size: 11.5px; color: #64748b; }
+                                        LineEdit {
+                                            text <=> root.inspector-end-text;
+                                            accepted => {
+                                                root.inspector-commit-single(
+                                                    root.inspector-start-text,
+                                                    root.inspector-dur-text,
+                                                    root.inspector-end-text,
+                                                    root.inspector-track-text,
+                                                    2
+                                                );
+                                            }
+                                            changed has-focus => {
+                                                if !self.has-focus {
+                                                    root.inspector-commit-single(
+                                                        root.inspector-start-text,
+                                                        root.inspector-dur-text,
+                                                        root.inspector-end-text,
+                                                        root.inspector-track-text,
+                                                        2
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    VerticalLayout {
+                                        spacing: 4px;
+                                        width: 96px;
+                                        Text { text: "Track (T#)"; font-size: 11.5px; color: #64748b; }
+                                        LineEdit {
+                                            text <=> root.inspector-track-text;
+                                            accepted => {
+                                                root.inspector-commit-single(
+                                                    root.inspector-start-text,
+                                                    root.inspector-dur-text,
+                                                    root.inspector-end-text,
+                                                    root.inspector-track-text,
+                                                    3
+                                                );
+                                            }
+                                            changed has-focus => {
+                                                if !self.has-focus {
+                                                    root.inspector-commit-single(
+                                                        root.inspector-start-text,
+                                                        root.inspector-dur-text,
+                                                        root.inspector-end-text,
+                                                        root.inspector-track-text,
+                                                        3
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Multi-clip inspector controls
+                            if root.inspector-multi: HorizontalLayout {
+                                spacing: 14px;
+
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    horizontal-stretch: 1;
+                                    Text { text: "Dời nhóm tới (ms)"; font-size: 11.5px; color: #64748b; }
+                                    LineEdit {
+                                        text <=> root.inspector-group-start-text;
+                                        accepted => { root.inspector-commit-group-start(self.text); }
+                                        changed has-focus => {
+                                            if !self.has-focus {
+                                                root.inspector-commit-group-start(self.text);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    horizontal-stretch: 1;
+                                    Text { text: "Đặt thời gian giữ cho tất cả (ms)"; font-size: 11.5px; color: #64748b; }
+                                    LineEdit {
+                                        text <=> root.inspector-group-dur-text;
+                                        accepted => { root.inspector-commit-group-dur(self.text); }
+                                        changed has-focus => {
+                                            if !self.has-focus {
+                                                root.inspector-commit-group-dur(self.text);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 5. Macro Save & Trigger Form
+                    Rectangle {
+                        background: #ffffff;
+                        border-radius: 10px;
+                        border-width: 1px;
+                        border-color: #e2e8f0;
+
+                        VerticalLayout {
+                            padding: 16px;
+                            spacing: 12px;
+
+                            HorizontalLayout {
+                                spacing: 14px;
+
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    horizontal-stretch: 2;
+
+                                    Text {
+                                        text: "Tên Macro";
+                                        font-size: 12.5px;
+                                        font-weight: 600;
+                                        color: #1e293b;
+                                    }
+
+                                    LineEdit {
+                                        placeholder-text: "Nhập tên macro (tối đa 80 ký tự)";
+                                        text <=> root.macro-name;
+                                        edited(t) => { root.macro-name-edited(t); }
+                                    }
+                                }
+
+                                VerticalLayout {
+                                    spacing: 4px;
+                                    horizontal-stretch: 2;
+
+                                    Text {
+                                        text: "Hotkey kích hoạt (Không bắt buộc · chặn LC/RC)";
+                                        font-size: 12.5px;
+                                        font-weight: 600;
+                                        color: #1e293b;
+                                    }
+
+                                    HorizontalLayout {
+                                        spacing: 6px;
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            height: 34px;
+                                            border-radius: 7px;
+                                            border-width: 1px;
+                                            border-color: root.is-capturing-hotkey
+                                                ? #fbbf24
+                                                : (root.has-hotkey ? #8b5cf6 : #cbd5e1);
+                                            background: root.is-capturing-hotkey
+                                                ? #fffbeb
+                                                : (root.has-hotkey ? #f5f3ff : #f8fafc);
+
+                                            Text {
+                                                text: root.is-capturing-hotkey ? "Nhấn phím / M3 / M4 (Esc huỷ)..." : root.hotkey-label;
+                                                font-size: 12.5px;
+                                                font-weight: 600;
+                                                color: root.is-capturing-hotkey
+                                                    ? #b45309
+                                                    : (root.has-hotkey ? #6d28d9 : #475569);
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+
+                                            TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => {
+                                                    canvas-focus.focus();
+                                                    root.toggle-hotkey-capture();
+                                                }
+                                            }
+                                        }
+
+                                        if root.has-hotkey: Rectangle {
+                                            width: 34px;
+                                            height: 34px;
+                                            border-radius: 7px;
+                                            border-width: 1px;
+                                            border-color: #fecaca;
+                                            background: clr-hk.has-hover ? #fef2f2 : #ffffff;
+
+                                            Text {
+                                                text: "×";
+                                                font-size: 15px;
+                                                font-weight: 700;
+                                                color: #b91c1c;
+                                                horizontal-alignment: center;
+                                                vertical-alignment: center;
+                                            }
+
+                                            clr-hk := TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.clear-hotkey(); }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 10px;
+
+                                Text {
+                                    text: "Chế độ chạy:";
+                                    font-size: 12.5px;
+                                    font-weight: 600;
+                                    color: #1e293b;
+                                    vertical-alignment: center;
+                                }
+
+                                ModeChip {
+                                    label: "Giữ để lặp (Hold)";
+                                    active: root.playback-mode-idx == 0;
+                                    clicked => { root.select-playback-mode(0); }
+                                }
+                                ModeChip {
+                                    label: "Bật/Tắt lặp (Toggle)";
+                                    active: root.playback-mode-idx == 1;
+                                    clicked => { root.select-playback-mode(1); }
+                                }
+                                ModeChip {
+                                    label: "Chạy 1 lần (Once)";
+                                    active: root.playback-mode-idx == 2;
+                                    clicked => { root.select-playback-mode(2); }
+                                }
+
+                                Rectangle { horizontal-stretch: 1; }
+
+                                Rectangle {
+                                    height: 32px;
+                                    min-width: 170px;
+                                    border-radius: 6px;
+                                    border-width: 1px;
+                                    border-color: root.preview-open ? #4f46e5 : #cbd5e1;
+                                    background: root.preview-open ? #eef2ff : #f8fafc;
+
+                                    HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+
+                                        Text {
+                                            text: root.preview-open ? "▾ Các bước sẽ chạy (ẩn)" : "▸ Các bước sẽ chạy (xem trước)";
+                                            font-size: 12px;
+                                            font-weight: 600;
+                                            color: root.preview-open ? #4f46e5 : #475569;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.preview-open = !root.preview-open; }
+                                    }
+                                }
+                            }
+
+                            if root.preview-open: Rectangle {
+                                background: #0b111d;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: #1e293b;
+
+                                VerticalLayout {
+                                    padding: 12px;
+
+                                    Text {
+                                        text: root.compiled-preview;
+                                        font-family: "Consolas";
+                                        font-size: 12px;
+                                        color: #e7edf8;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 12px;
+                                alignment: space-between;
+
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 8px;
+                                    border-width: 1px;
+                                    border-color: root.status-is-error
+                                        ? #fecaca
+                                        : (root.status-is-success ? #bbf7d0 : #e2e8f0);
+                                    background: root.status-is-error
+                                        ? #fef2f2
+                                        : (root.status-is-success ? #dcfce7 : #f8fafc);
+
+                                    HorizontalLayout {
+                                        padding-left: 12px;
+                                        padding-right: 12px;
+                                        padding-top: 8px;
+                                        padding-bottom: 8px;
+
+                                        Text {
+                                            text: root.status-message;
+                                            font-size: 12.5px;
+                                            font-weight: (root.status-is-error || root.status-is-success) ? 600 : 400;
+                                            color: root.status-is-error
+                                                ? #b91c1c
+                                                : (root.status-is-success ? #166534 : #475569);
+                                            vertical-alignment: center;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 148px;
+                                    height: 38px;
+                                    border-radius: 8px;
+                                    background: save-mac-touch.pressed ? #3730a3 : (save-mac-touch.has-hover ? #4338ca : #4f46e5);
+
+                                    Text {
+                                        text: "Lưu Macro";
+                                        font-size: 13.5px;
+                                        font-weight: 600;
+                                        color: #ffffff;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+
+                                    save-mac-touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.save-macro(); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            }
+        }
+    }
+}

@@ -3,5 +3,6 @@
 pub mod app;
 pub mod domain;
 pub mod engine;
+pub mod macro_editor;
 pub mod platform;
 pub mod storage;

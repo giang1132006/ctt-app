@@ -1,9 +1,11 @@
 import { Palette, ScrollView } from "std-widgets.slint";
 import { HomePage, BindingItem } from "components/home.slint";
 import { BindingView, BindingRuleItem } from "components/binding_view.slint";
+import { MacrosView, UiClipItem, UiRulerTick, UiTrackHeader, UiSavedMacroItem } from "components/macros_view.slint";
+import { MacroIoModal } from "components/macro_io_modal.slint";
 import { StatusBar } from "components/status_bar.slint";
 
-export { BindingItem, BindingRuleItem }
+export { BindingItem, BindingRuleItem, UiClipItem, UiRulerTick, UiTrackHeader, UiSavedMacroItem }
 
 component NavItem inherits Rectangle {
     in property <string> label;
@@ -38,10 +40,10 @@ component NavItem inherits Rectangle {
 
 export component AppWindow inherits Window {
     title: "CTT Project";
-    preferred-width: 1080px;
-    preferred-height: 720px;
-    min-width: 760px;
-    min-height: 520px;
+    preferred-width: 1220px;
+    preferred-height: 820px;
+    min-width: 820px;
+    min-height: 560px;
     background: #f8fafc;
 
     init => {
@@ -75,6 +77,75 @@ export component AppWindow inherits Window {
     in-out property <string> search-query: "";
     in-out property <string> status-text: "Ready";
 
+    // Macro NLE Editor & Import/Export Modal properties
+    in-out property <[UiSavedMacroItem]> macro-saved-items: [];
+    in-out property <bool> macro-editor-open: false;
+    in-out property <int> macro-selected-saved-idx: 0;
+    in-out property <int> macro-clip-count: 0;
+    in-out property <int> macro-selected-count: 0;
+    in-out property <int> macro-total-ms: 0;
+    in-out property <int> macro-playhead-ms: 0;
+    in-out property <string> macro-active-track-label: "T1";
+    in-out property <string> macro-loop-status-text: "Vùng lặp: Không lặp";
+    in-out property <string> macro-zoom-label: "200 ms / 100 px";
+    in-out property <bool> macro-can-undo: false;
+    in-out property <bool> macro-can-redo: false;
+    in-out property <bool> macro-can-razor: false;
+    in-out property <bool> macro-has-loop: false;
+    in-out property <bool> macro-snap-enabled: true;
+    in-out property <bool> macro-is-playing: false;
+    in-out property <bool> macro-is-recording: false;
+    in-out property <bool> macro-is-capturing-key: false;
+    in-out property <bool> macro-is-capturing-hotkey: false;
+    in-out property <string> macro-capture-banner: "";
+    in-out property <bool> macro-hover-resize: false;
+    in-out property <[UiClipItem]> macro-clips: [];
+    in-out property <[UiRulerTick]> macro-ruler-ticks: [];
+    in-out property <[UiTrackHeader]> macro-track-headers: [];
+    in-out property <length> macro-playhead-x: 58px;
+    in-out property <bool> macro-has-loop-overlay: false;
+    in-out property <length> macro-loop-x: 0px;
+    in-out property <length> macro-loop-width: 0px;
+    in-out property <length> macro-snap-guide-x: -100px;
+    in-out property <bool> macro-show-snap-guide: false;
+    in-out property <bool> macro-show-marquee: false;
+    in-out property <length> macro-marquee-x: 0px;
+    in-out property <length> macro-marquee-y: 0px;
+    in-out property <length> macro-marquee-width: 0px;
+    in-out property <length> macro-marquee-height: 0px;
+    in-out property <bool> macro-inspector-visible: false;
+    in-out property <bool> macro-inspector-multi: false;
+    in-out property <string> macro-inspector-title: "";
+    in-out property <bool> macro-inspector-is-key: false;
+    in-out property <string> macro-inspector-key-label: "";
+    in-out property <int> macro-inspector-mouse-idx: 0;
+    in-out property <string> macro-inspector-start-text: "";
+    in-out property <string> macro-inspector-dur-text: "";
+    in-out property <string> macro-inspector-end-text: "";
+    in-out property <string> macro-inspector-track-text: "";
+    in-out property <string> macro-inspector-group-start-text: "";
+    in-out property <string> macro-inspector-group-dur-text: "";
+    in-out property <string> macro-gap-input-text: "100";
+    in-out property <string> macro-playhead-input-text: "0";
+    in-out property <string> macro-name: "";
+    in-out property <string> macro-hotkey-label: "Chưa gán (tuỳ chọn)";
+    in-out property <bool> macro-has-hotkey: false;
+    in-out property <int> macro-playback-mode-idx: 0;
+    in-out property <string> macro-compiled-preview: "";
+    in-out property <string> macro-status-message: "";
+    in-out property <bool> macro-status-is-error: false;
+    in-out property <bool> macro-status-is-success: false;
+    in-out property <bool> macro-io-modal-open: false;
+    in-out property <string> macro-io-text: "";
+    in-out property <bool> macro-io-replace-mode: true;
+    in-out property <string> macro-io-default-hold-text: "100";
+    in-out property <bool> macro-io-valid: false;
+    in-out property <string> macro-io-validation-message: "";
+    in-out property <int> macro-io-clip-count: 0;
+    in-out property <int> macro-io-track-count: 0;
+    in-out property <int> macro-io-total-ms: 0;
+    in-out property <string> macro-io-warning-text: "";
+
     callback select-tab(int);
     callback select-profile(int);
     callback create-profile();
@@ -85,6 +156,42 @@ export component AppWindow inherits Window {
     callback emergency-stop();
     callback increment-counter();
     callback quit-requested();
+
+    // Macro callbacks
+    callback macro-new();
+    callback macro-close-editor();
+    callback macro-open-io();
+    callback macro-save();
+    callback macro-load-saved(int);
+    callback macro-delete-saved(int);
+    callback macro-toolbar-action(string);
+    callback macro-insert-key();
+    callback macro-insert-mouse(int);
+    callback macro-insert-gap(string);
+    callback macro-set-playhead-text(string);
+    callback macro-canvas-resized(float, float);
+    callback macro-canvas-pointer-down(float, float, int, bool, bool, bool);
+    callback macro-canvas-pointer-move(float, float, bool);
+    callback macro-canvas-pointer-up(int, bool, bool, bool);
+    callback macro-canvas-double-click(float, float, bool);
+    callback macro-canvas-wheel(float, float, float, bool, bool);
+    callback macro-canvas-key-pressed(string, bool, bool, bool, bool);
+    callback macro-canvas-key-released(string);
+    callback macro-inspector-commit-single(string, string, string, string, int);
+    callback macro-inspector-select-mouse(int);
+    callback macro-inspector-capture-key();
+    callback macro-inspector-commit-group-start(string);
+    callback macro-inspector-commit-group-dur(string);
+    callback macro-name-edited(string);
+    callback macro-toggle-hotkey-capture();
+    callback macro-clear-hotkey();
+    callback macro-select-playback-mode(int);
+    callback macro-io-close();
+    callback macro-io-set-replace-mode(bool);
+    callback macro-io-default-hold-changed(string);
+    callback macro-io-load-from-timeline();
+    callback macro-io-text-edited(string);
+    callback macro-io-apply-import();
 
     HorizontalLayout {
         spacing: 0px;
@@ -188,60 +295,99 @@ export component AppWindow inherits Window {
                     delete-profile => { root.delete-profile(); }
                 }
 
-                if root.active-tab == 1: ScrollView {
+                if root.active-tab == 1: MacrosView {
                     width: 100%;
                     height: 100%;
+                    has-profile: root.has-profile;
+                    active-profile-name: root.active-profile-name;
+                    saved-macros: root.macro-saved-items;
+                    editor-open: root.macro-editor-open;
+                    selected-saved-idx <=> root.macro-selected-saved-idx;
+                    clip-count: root.macro-clip-count;
+                    selected-count: root.macro-selected-count;
+                    total-ms: root.macro-total-ms;
+                    playhead-ms: root.macro-playhead-ms;
+                    active-track-label: root.macro-active-track-label;
+                    loop-status-text: root.macro-loop-status-text;
+                    zoom-label: root.macro-zoom-label;
+                    can-undo: root.macro-can-undo;
+                    can-redo: root.macro-can-redo;
+                    can-razor: root.macro-can-razor;
+                    has-loop: root.macro-has-loop;
+                    snap-enabled: root.macro-snap-enabled;
+                    is-playing: root.macro-is-playing;
+                    is-recording: root.macro-is-recording;
+                    is-capturing-key: root.macro-is-capturing-key;
+                    is-capturing-hotkey: root.macro-is-capturing-hotkey;
+                    capture-banner: root.macro-capture-banner;
+                    hover-resize: root.macro-hover-resize;
+                    clips: root.macro-clips;
+                    ruler-ticks: root.macro-ruler-ticks;
+                    track-headers: root.macro-track-headers;
+                    playhead-x: root.macro-playhead-x;
+                    has-loop-overlay: root.macro-has-loop-overlay;
+                    loop-x: root.macro-loop-x;
+                    loop-width: root.macro-loop-width;
+                    snap-guide-x: root.macro-snap-guide-x;
+                    show-snap-guide: root.macro-show-snap-guide;
+                    show-marquee: root.macro-show-marquee;
+                    marquee-x: root.macro-marquee-x;
+                    marquee-y: root.macro-marquee-y;
+                    marquee-width: root.macro-marquee-width;
+                    marquee-height: root.macro-marquee-height;
+                    inspector-visible: root.macro-inspector-visible;
+                    inspector-multi: root.macro-inspector-multi;
+                    inspector-title: root.macro-inspector-title;
+                    inspector-is-key: root.macro-inspector-is-key;
+                    inspector-key-label: root.macro-inspector-key-label;
+                    inspector-mouse-idx: root.macro-inspector-mouse-idx;
+                    mouse-button-names: root.mouse-button-names;
+                    inspector-start-text <=> root.macro-inspector-start-text;
+                    inspector-dur-text <=> root.macro-inspector-dur-text;
+                    inspector-end-text <=> root.macro-inspector-end-text;
+                    inspector-track-text <=> root.macro-inspector-track-text;
+                    inspector-group-start-text <=> root.macro-inspector-group-start-text;
+                    inspector-group-dur-text <=> root.macro-inspector-group-dur-text;
+                    gap-input-text <=> root.macro-gap-input-text;
+                    playhead-input-text <=> root.macro-playhead-input-text;
+                    macro-name <=> root.macro-name;
+                    hotkey-label: root.macro-hotkey-label;
+                    has-hotkey: root.macro-has-hotkey;
+                    playback-mode-idx: root.macro-playback-mode-idx;
+                    compiled-preview: root.macro-compiled-preview;
+                    status-message: root.macro-status-message;
+                    status-is-error: root.macro-status-is-error;
+                    status-is-success: root.macro-status-is-success;
 
-                    VerticalLayout {
-                        padding: 28px;
-                        spacing: 18px;
-                        alignment: start;
-
-                        Text {
-                            text: "Macros";
-                            font-size: 26px;
-                            font-weight: 700;
-                            color: #0f172a;
-                        }
-
-                        Rectangle {
-                            background: #ffffff;
-                            border-radius: 12px;
-                            border-width: 1px;
-                            border-color: #e2e8f0;
-
-                            VerticalLayout {
-                                padding: 24px;
-                                spacing: 16px;
-
-                                Rectangle {
-                                    background: #ffffff;
-                                    border-radius: 10px;
-                                    border-width: 1px;
-                                    border-color: #e2e8f0;
-
-                                    VerticalLayout {
-                                        padding: 20px;
-                                        spacing: 10px;
-
-                                        Text {
-                                            text: "Quản lý Macro — " + root.active-profile-name;
-                                            font-size: 16px;
-                                            font-weight: 700;
-                                            color: #0f172a;
-                                        }
-
-                                        Text {
-                                            text: "Chưa có macro nào được cấu hình cho profile hiện tại. Hệ thống ghi và phát macro sẽ được tích hợp ở các bước tiếp theo.";
-                                            font-size: 13.5px;
-                                            color: #64748b;
-                                            wrap: word-wrap;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    create-profile => { root.create-profile(); }
+                    new-macro => { root.macro-new(); }
+                    close-editor => { root.macro-close-editor(); }
+                    open-io-modal => { root.macro-open-io(); }
+                    save-macro => { root.macro-save(); }
+                    load-saved-macro(idx) => { root.macro-load-saved(idx); }
+                    delete-saved-macro(idx) => { root.macro-delete-saved(idx); }
+                    toolbar-action(act) => { root.macro-toolbar-action(act); }
+                    insert-key-clip => { root.macro-insert-key(); }
+                    insert-mouse-clip(btn) => { root.macro-insert-mouse(btn); }
+                    insert-gap(g) => { root.macro-insert-gap(g); }
+                    set-playhead-text(p) => { root.macro-set-playhead-text(p); }
+                    canvas-resized(w, h) => { root.macro-canvas-resized(w, h); }
+                    canvas-pointer-down(x, y, btn, c, s, a) => { root.macro-canvas-pointer-down(x, y, btn, c, s, a); }
+                    canvas-pointer-move(x, y, a) => { root.macro-canvas-pointer-move(x, y, a); }
+                    canvas-pointer-up(btn, c, s, a) => { root.macro-canvas-pointer-up(btn, c, s, a); }
+                    canvas-double-click(x, y, a) => { root.macro-canvas-double-click(x, y, a); }
+                    canvas-wheel(x, dx, dy, c, s) => { root.macro-canvas-wheel(x, dx, dy, c, s); }
+                    canvas-key-pressed(t, rep, c, s, a) => { root.macro-canvas-key-pressed(t, rep, c, s, a); }
+                    canvas-key-released(t) => { root.macro-canvas-key-released(t); }
+                    inspector-commit-single(s, d, e, tr, f) => { root.macro-inspector-commit-single(s, d, e, tr, f); }
+                    inspector-select-mouse(m) => { root.macro-inspector-select-mouse(m); }
+                    inspector-capture-key => { root.macro-inspector-capture-key(); }
+                    inspector-commit-group-start(v) => { root.macro-inspector-commit-group-start(v); }
+                    inspector-commit-group-dur(v) => { root.macro-inspector-commit-group-dur(v); }
+                    macro-name-edited(t) => { root.macro-name-edited(t); }
+                    toggle-hotkey-capture => { root.macro-toggle-hotkey-capture(); }
+                    clear-hotkey => { root.macro-clear-hotkey(); }
+                    select-playback-mode(m) => { root.macro-select-playback-mode(m); }
                 }
 
                 if root.active-tab == 2: BindingView {
@@ -267,7 +413,7 @@ export component AppWindow inherits Window {
 
             StatusBar {
                 horizontal-stretch: 1;
-                height: 35px;
+                height: 50px;
                 active-profile-name: root.active-profile-name;
                 engine-status-text: root.engine-status-text;
                 mapping-active: root.mapping-active;
@@ -278,5 +424,26 @@ export component AppWindow inherits Window {
                 emergency-stop => { root.emergency-stop(); }
             }
         }
+    }
+
+    if root.macro-io-modal-open: MacroIoModal {
+        width: 100%;
+        height: 100%;
+        io-text <=> root.macro-io-text;
+        replace-mode: root.macro-io-replace-mode;
+        default-hold-text <=> root.macro-io-default-hold-text;
+        valid: root.macro-io-valid;
+        validation-message: root.macro-io-validation-message;
+        clip-count: root.macro-io-clip-count;
+        track-count: root.macro-io-track-count;
+        total-ms: root.macro-io-total-ms;
+        warning-text: root.macro-io-warning-text;
+
+        close-modal => { root.macro-io-close(); }
+        set-replace-mode(rep) => { root.macro-io-set-replace-mode(rep); }
+        default-hold-changed(val) => { root.macro-io-default-hold-changed(val); }
+        load-from-timeline => { root.macro-io-load-from-timeline(); }
+        text-edited(txt) => { root.macro-io-text-edited(txt); }
+        apply-import => { root.macro-io-apply-import(); }
     }
 }

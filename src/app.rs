@@ -2,11 +2,13 @@
 
 use crate::domain::config::AppConfig;
 use crate::domain::keys::{InputSource, KeyboardKey, ModifierMask, MouseButton, MouseWheel};
+use crate::domain::macros::MacroId;
 use crate::domain::mapping::MappingTarget;
 use crate::domain::profile::Profile as DomainProfile;
 use crate::domain::validation::{validate_profile_rules, MappingError, MappingWarning};
 use crate::engine::command::EngineStatus;
 use crate::engine::remapper::RemapEngine;
+use crate::macro_editor::MacroEditorState;
 use crate::platform::mock::MockInputSynthesizer;
 
 /// Primary sidebar navigation tabs matching the application layout.
@@ -85,7 +87,17 @@ pub struct DomainRuleView {
     pub enabled: bool,
 }
 
-/// Top-level application state coordinating navigation, profiles, bindings, and the remap engine.
+/// Summary projection of a saved macro inside the active profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedMacroView {
+    pub id: i32,
+    pub name: String,
+    pub trigger_label: String,
+    pub clip_count: i32,
+    pub total_ms: i32,
+}
+
+/// Top-level application state coordinating navigation, profiles, bindings, macros, and the remap engine.
 #[derive(Debug)]
 pub struct CttApp {
     active_tab: NavTab,
@@ -97,6 +109,8 @@ pub struct CttApp {
     next_profile_id: u32,
     engine: RemapEngine,
     synthesizer: MockInputSynthesizer,
+    macro_editor: MacroEditorState,
+    next_macro_id: u32,
     validation_error: String,
     validation_warnings: Vec<String>,
     search_query: String,
@@ -120,6 +134,8 @@ impl Default for CttApp {
             next_profile_id: 1,
             engine,
             synthesizer,
+            macro_editor: MacroEditorState::default(),
+            next_macro_id: 1,
             validation_error: String::new(),
             validation_warnings: Vec::new(),
             search_query: String::new(),
@@ -469,8 +485,9 @@ impl CttApp {
         };
     }
 
-    /// Immediately triggers Emergency Stop, releasing all active holds and disabling mapping.
+    /// Immediately triggers Emergency Stop, releasing all active holds and stopping macro recording/preview.
     pub fn trigger_emergency_stop(&mut self) {
+        self.macro_editor.stop_all_active_modes();
         if let Err(err) = self.engine.emergency_stop_all(&mut self.synthesizer) {
             self.status = format!("Emergency Stop error: {err}");
             return;
@@ -479,6 +496,98 @@ impl CttApp {
             "Emergency Stopped ({})",
             self.config.emergency_stop.display_name()
         );
+    }
+
+    /// Returns a read-only reference to the multi-track [`MacroEditorState`].
+    pub fn macro_editor(&self) -> &MacroEditorState {
+        &self.macro_editor
+    }
+
+    /// Returns a mutable reference to the multi-track [`MacroEditorState`].
+    pub fn macro_editor_mut(&mut self) -> &mut MacroEditorState {
+        &mut self.macro_editor
+    }
+
+    /// Returns UI summaries of all saved macros in the active profile.
+    pub fn saved_macro_views(&self) -> Vec<SavedMacroView> {
+        let Some(profile) = self.active_domain_profile() else {
+            return Vec::new();
+        };
+        profile
+            .macros
+            .iter()
+            .map(|mac| {
+                let max_clip = mac.clips.iter().map(|c| c.end_ms()).max().unwrap_or(0);
+                let max_loop = mac.loop_region.map_or(0, |lp| lp.end_ms);
+                SavedMacroView {
+                    id: mac.id.0 as i32,
+                    name: mac.name.clone(),
+                    trigger_label: mac.trigger.map_or_else(
+                        || "Không gán hotkey".to_string(),
+                        |t| format!("{} · {}", t.source.display_name(), t.mode.display_name()),
+                    ),
+                    clip_count: mac.clips.len() as i32,
+                    total_ms: max_clip.max(max_loop) as i32,
+                }
+            })
+            .collect()
+    }
+
+    /// Validates and saves the current macro draft into the active profile.
+    pub fn save_current_macro(&mut self) -> Result<(), String> {
+        if !self.has_active_profile() {
+            let msg = "Vui lòng tạo Profile trước khi lưu Macro.".to_string();
+            self.macro_editor.status_message = msg.clone();
+            self.macro_editor.status_is_error = true;
+            self.macro_editor.status_is_success = false;
+            self.status = msg.clone();
+            return Err(msg);
+        }
+
+        let candidate_id = MacroId(self.next_macro_id);
+        let mac = self
+            .macro_editor
+            .build_validated_macro(candidate_id, self.config.emergency_stop)?;
+        if mac.id == candidate_id {
+            self.next_macro_id += 1;
+        }
+
+        let idx = self.active_profile_index;
+        self.domain_profiles[idx].upsert_macro(mac.clone());
+        self.status = format!("Đã lưu Macro '{}' ({} clip)", mac.name, mac.clips.len());
+        Ok(())
+    }
+
+    /// Loads a saved macro from the active profile by its index into the NLE editor.
+    pub fn load_saved_macro(&mut self, index: usize) -> bool {
+        let Some(mac) = self
+            .active_domain_profile()
+            .and_then(|p| p.macros.get(index))
+            .cloned()
+        else {
+            return false;
+        };
+        self.macro_editor.load_macro(&mac);
+        self.status = format!("Đang chỉnh sửa Macro '{}'", mac.name);
+        true
+    }
+
+    /// Deletes a saved macro from the active profile by its index.
+    pub fn delete_saved_macro(&mut self, index: usize) -> bool {
+        if !self.has_active_profile() {
+            return false;
+        }
+        let idx = self.active_profile_index;
+        let Some(mac_id) = self.domain_profiles[idx].macros.get(index).map(|m| m.id) else {
+            return false;
+        };
+        let removed_name = self.domain_profiles[idx].macros[index].name.clone();
+        self.domain_profiles[idx].remove_macro(mac_id);
+        if self.macro_editor.current_macro_id == Some(mac_id) {
+            self.macro_editor.current_macro_id = None;
+        }
+        self.status = format!("Đã xoá Macro '{removed_name}'");
+        true
     }
 
     /// Returns `true` when key remapping is currently active.
@@ -707,5 +816,50 @@ mod tests {
         app.trigger_emergency_stop();
         assert!(!app.is_mapping_enabled());
         assert_eq!(app.engine_status(), EngineStatus::EmergencyStopped);
+    }
+
+    #[test]
+    fn test_save_load_delete_macro_and_emergency_stop_cancels_playback() {
+        let mut app = CttApp::new();
+        assert!(!app.macro_editor().editor_open);
+        assert!(app.save_current_macro().is_err());
+
+        app.create_profile();
+        app.macro_editor_mut().reset_new_macro();
+        assert!(app.macro_editor().editor_open);
+
+        app.macro_editor_mut().macro_name = "Test Combo".to_string();
+        app.macro_editor_mut().insert_mouse_clip(MouseButton::Left);
+        app.macro_editor_mut().set_playhead_ms(50);
+        app.macro_editor_mut()
+            .on_key_pressed("\u{000a}", false, false, false, false);
+        app.macro_editor_mut().insert_key_clip_and_capture();
+        app.macro_editor_mut()
+            .on_key_pressed("e", false, false, false, false);
+        app.macro_editor_mut().on_key_released("e");
+
+        app.save_current_macro()
+            .expect("Valid macro should save to active profile");
+        assert_eq!(app.saved_macro_views().len(), 1);
+        assert_eq!(app.saved_macro_views()[0].name, "Test Combo");
+
+        app.macro_editor_mut().toggle_playback();
+        assert!(app.macro_editor().is_playing());
+        app.trigger_emergency_stop();
+        assert!(!app.macro_editor().is_playing());
+
+        app.macro_editor_mut().close_editor();
+        assert!(!app.macro_editor().editor_open);
+
+        app.macro_editor_mut().reset_new_macro();
+        assert!(app.macro_editor().editor_open);
+        assert!(app.macro_editor().clips.is_empty());
+
+        app.macro_editor_mut().close_editor();
+        assert!(app.load_saved_macro(0));
+        assert!(app.macro_editor().editor_open);
+        assert_eq!(app.macro_editor().clips.len(), 2);
+        assert!(app.delete_saved_macro(0));
+        assert!(app.saved_macro_views().is_empty());
     }
 }

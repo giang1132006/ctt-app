@@ -1,0 +1,412 @@
+import { LineEdit, ScrollView, TextEdit } from "std-widgets.slint";
+
+export component MacroIoModal inherits Rectangle {
+    in-out property <string> io-text: "";
+    in property <bool> replace-mode: true;
+    in-out property <string> default-hold-text: "100";
+    in property <bool> valid: false;
+    in property <string> validation-message: "";
+    in property <int> clip-count: 0;
+    in property <int> track-count: 0;
+    in property <int> total-ms: 0;
+    in property <string> warning-text: "";
+    in-out property <bool> syntax-help-open: false;
+
+    callback close-modal();
+    callback set-replace-mode(bool);
+    callback default-hold-changed(string);
+    callback load-from-timeline();
+    callback text-edited(string);
+    callback apply-import();
+
+    background: #04070ec7;
+
+    // Catch clicks on backdrop
+    TouchArea {
+        clicked => { root.close-modal(); }
+    }
+
+    // Centered Modal Dialog Card (max-width ~820px)
+    Rectangle {
+        width: Math.min(parent.width - 48px, 820px);
+        height: Math.min(parent.height - 48px, 640px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: #cbd5e1;
+        background: #ffffff;
+        clip: true;
+
+        // Absorb inner clicks so backdrop doesn't close dialog
+        TouchArea {}
+
+        ScrollView {
+            width: 100%;
+            height: 100%;
+
+            VerticalLayout {
+                padding: 22px;
+                spacing: 14px;
+
+                // Header
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: space-between;
+
+                    VerticalLayout {
+                        spacing: 2px;
+                        horizontal-stretch: 1;
+
+                        Text {
+                            text: "MACRO SEQUENCE / IMPORT.MD";
+                            font-size: 10.5px;
+                            font-weight: 800;
+                            letter-spacing: 1.2px;
+                            color: #0d9488;
+                        }
+
+                        Text {
+                            text: "Import / Export chuỗi lệnh Macro";
+                            font-size: 19px;
+                            font-weight: 700;
+                            color: #0f172a;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #cbd5e1;
+                        background: x-touch.has-hover ? #f1f5f9 : #ffffff;
+
+                        Text {
+                            text: "×";
+                            font-size: 17px;
+                            font-weight: 700;
+                            color: #475569;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        x-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.close-modal(); }
+                        }
+                    }
+                }
+
+                Text {
+                    text: "Dán hoặc chỉnh sửa chuỗi lệnh chuẩn import.md (ví dụ: {HOLDMS:120}{CTRL}c{WAITMS:50}{LMBD}{WAITMS:100}{LMBU}).";
+                    font-size: 12.5px;
+                    color: #64748b;
+                    wrap: word-wrap;
+                }
+
+                // Options Row
+                HorizontalLayout {
+                    spacing: 10px;
+
+                    Text {
+                        text: "Chế độ:";
+                        font-size: 12.5px;
+                        font-weight: 600;
+                        color: #1e293b;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        height: 32px;
+                        min-width: 128px;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: root.replace-mode ? #4f46e5 : #cbd5e1;
+                        background: root.replace-mode ? #eef2ff : #ffffff;
+
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            Text {
+                                text: "Thay thế Timeline";
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: root.replace-mode ? #4f46e5 : #475569;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.set-replace-mode(true); }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 32px;
+                        min-width: 132px;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: !root.replace-mode ? #4f46e5 : #cbd5e1;
+                        background: !root.replace-mode ? #eef2ff : #ffffff;
+
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            Text {
+                                text: "Chèn tại đầu phát";
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: !root.replace-mode ? #4f46e5 : #475569;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.set-replace-mode(false); }
+                        }
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+
+                    Text {
+                        text: "Giữ mặc định (ms):";
+                        font-size: 12px;
+                        color: #475569;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        width: 72px;
+                        LineEdit {
+                            text <=> root.default-hold-text;
+                            edited(t) => { root.default-hold-changed(t); }
+                        }
+                    }
+                }
+
+                // Editor Header & Textarea
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: space-between;
+
+                    Text {
+                        text: "Chuỗi lệnh Macro (Import / Export)";
+                        font-size: 12.5px;
+                        font-weight: 700;
+                        color: #1e293b;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        height: 28px;
+                        min-width: 120px;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: #cbd5e1;
+                        background: tl-touch.has-hover ? #f8fafc : #ffffff;
+
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            Text {
+                                text: "Lấy từ Timeline";
+                                font-size: 12px;
+                                font-weight: 600;
+                                color: #1e293b;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        tl-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.load-from-timeline(); }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 150px;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: #1e293b;
+                    background: #060a12;
+
+                    TextEdit {
+                        x: 4px;
+                        y: 4px;
+                        width: parent.width - 8px;
+                        height: parent.height - 8px;
+                        font-size: 13px;
+                        text <=> root.io-text;
+                        edited(t) => { root.text-edited(t); }
+                    }
+                }
+
+                // Live Validation Box + Badges
+                Rectangle {
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: root.valid ? #bbf7d0 : #fecaca;
+                    background: root.valid ? #f0fdf4 : #fef2f2;
+
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 8px;
+
+                        Text {
+                            text: root.validation-message;
+                            font-size: 12.5px;
+                            font-weight: 600;
+                            color: root.valid ? #166534 : #b91c1c;
+                            wrap: word-wrap;
+                        }
+
+                        if root.valid: HorizontalLayout {
+                            spacing: 8px;
+
+                            Rectangle {
+                                height: 24px;
+                                border-radius: 12px;
+                                background: #ffffff;
+                                border-width: 1px;
+                                border-color: #cbd5e1;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    Text { text: root.clip-count + " clip"; font-size: 11.5px; font-weight: 600; color: #0f172a; vertical-alignment: center; }
+                                }
+                            }
+
+                            Rectangle {
+                                height: 24px;
+                                border-radius: 12px;
+                                background: #ffffff;
+                                border-width: 1px;
+                                border-color: #cbd5e1;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    Text { text: root.track-count + " track song song"; font-size: 11.5px; font-weight: 600; color: #4f46e5; vertical-alignment: center; }
+                                }
+                            }
+
+                            Rectangle {
+                                height: 24px;
+                                border-radius: 12px;
+                                background: #ffffff;
+                                border-width: 1px;
+                                border-color: #cbd5e1;
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    Text { text: "Tổng: " + root.total-ms + " ms"; font-size: 11.5px; font-weight: 600; color: #0d9488; vertical-alignment: center; }
+                                }
+                            }
+                        }
+
+                        if root.warning-text != "": Text {
+                            text: "Lưu ý: " + root.warning-text;
+                            font-size: 11.5px;
+                            color: #b45309;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                // Collapsible Quick Syntax Help
+                Rectangle {
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: #e2e8f0;
+                    background: #f8fafc;
+
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 6px;
+
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.syntax-help-open = !root.syntax-help-open; }
+
+                            HorizontalLayout {
+                                Text {
+                                    text: root.syntax-help-open ? "▾ Tra cứu nhanh cú pháp import.md" : "▸ Tra cứu nhanh cú pháp import.md";
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    color: #334155;
+                                }
+                            }
+                        }
+
+                        if root.syntax-help-open: VerticalLayout {
+                            spacing: 3px;
+                            Text { text: "• Thời gian: {WAITMS:100}, {WAIT:0.5}, {WAITMS:40-60}, {HOLDMS:150}, {HOLD:0.2}"; font-size: 11.5px; color: #475569; wrap: word-wrap; }
+                            Text { text: "• Nhấn/Nhả song song: {PRESS}w{WAITMS:200}{RELEASE}w, {LMBD}{WAITMS:100}{LMBU}"; font-size: 11.5px; color: #475569; wrap: word-wrap; }
+                            Text { text: "• Modifier & Đặc biệt: {CTRL}, {RCTRL}, {SHIFT}, {ALT}, {LWIN}, {SPACE}, {ENTER}, {ESC}, {DELETE}, {F1}..{F24}"; font-size: 11.5px; color: #475569; wrap: word-wrap; }
+                            Text { text: "• Chuột: {LMB}/{RMB}/{MMB}/{MB4}/{MB5} (click) và {LMBD}/{LMBU}, {RMBD}/{RMBU}, {MMBD}/{MMBU}, {MB4D}/{MB4U}, {MB5D}/{MB5U}"; font-size: 11.5px; color: #475569; wrap: word-wrap; }
+                        }
+                    }
+                }
+
+                // Footer
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: end;
+
+                    Rectangle {
+                        width: 96px;
+                        height: 36px;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #cbd5e1;
+                        background: close-btn.has-hover ? #f8fafc : #ffffff;
+
+                        Text {
+                            text: "Đóng";
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: #1e293b;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        close-btn := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.close-modal(); }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 174px;
+                        height: 36px;
+                        border-radius: 8px;
+                        background: root.valid
+                            ? (imp-btn.pressed ? #3730a3 : (imp-btn.has-hover ? #4338ca : #4f46e5))
+                            : #94a3b8;
+
+                        Text {
+                            text: "Import vào Timeline";
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: #ffffff;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+
+                        imp-btn := TouchArea {
+                            mouse-cursor: root.valid ? pointer : default;
+                            clicked => {
+                                if root.valid {
+                                    root.apply-import();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

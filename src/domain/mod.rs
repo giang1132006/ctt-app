@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod keys;
+pub mod macro_io;
 pub mod macros;
 pub mod mapping;
 pub mod profile;

@@ -68,6 +68,9 @@ cargo fmt --check
 
 # Build optimized release binary (hides console window on Windows)
 cargo build --release
+
+# Build & package portable Windows release folder + ZIP archive (dist\ctt-app-windows-x64.zip)
+.\build_release.bat
 ```
 
 *(Note: Packaging/installer commands are **TBD** pending release tooling decisions.)*

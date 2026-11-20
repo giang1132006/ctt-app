@@ -2,10 +2,11 @@
 
 use crate::domain::config::{EmergencyStopHotkey, CURRENT_SCHEMA_VERSION};
 use crate::domain::keys::InputSource;
+use crate::domain::macros::{MacroDefinition, MacroId};
 use crate::domain::mapping::{CompiledMappingTable, KeyBindingRule, MappingTarget};
 use crate::domain::validation::{validate_profile_rules, ValidationReport};
 
-/// Named mapping profile holding an ordered list of key binding rules.
+/// Named mapping profile holding ordered key binding rules and saved macros.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Profile {
     pub id: u32,
@@ -13,6 +14,7 @@ pub struct Profile {
     pub schema_version: u32,
     pub enabled: bool,
     pub rules: Vec<KeyBindingRule>,
+    pub macros: Vec<MacroDefinition>,
 }
 
 impl Profile {
@@ -24,6 +26,7 @@ impl Profile {
             schema_version: CURRENT_SCHEMA_VERSION,
             enabled: true,
             rules: Vec::new(),
+            macros: Vec::new(),
         }
     }
 
@@ -68,6 +71,33 @@ impl Profile {
         let before = self.rules.len();
         self.rules.retain(|r| r.source != source);
         self.rules.len() != before
+    }
+
+    /// Inserts or updates a saved macro in this profile, returning its [`MacroId`].
+    pub fn upsert_macro(&mut self, mut macro_def: MacroDefinition) -> MacroId {
+        if let Some(existing) = self.macros.iter_mut().find(|m| m.id == macro_def.id) {
+            *existing = macro_def;
+            return existing.id;
+        }
+        if macro_def.id.0 == 0 {
+            let next_id = self.macros.iter().map(|m| m.id.0).max().unwrap_or(0) + 1;
+            macro_def.id = MacroId(next_id);
+        }
+        let id = macro_def.id;
+        self.macros.push(macro_def);
+        id
+    }
+
+    /// Removes the macro matching `id`, returning `true` if found and removed.
+    pub fn remove_macro(&mut self, id: MacroId) -> bool {
+        let before = self.macros.len();
+        self.macros.retain(|m| m.id != id);
+        self.macros.len() != before
+    }
+
+    /// Looks up a saved macro by its [`MacroId`].
+    pub fn get_macro(&self, id: MacroId) -> Option<&MacroDefinition> {
+        self.macros.iter().find(|m| m.id == id)
     }
 }
 

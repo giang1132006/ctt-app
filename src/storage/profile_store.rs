@@ -5,7 +5,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::domain::config::{EmergencyStopHotkey, CURRENT_SCHEMA_VERSION};
-use crate::domain::keys::InputSource;
+use crate::domain::keys::{InputSource, KeyboardKey, MouseButton};
+use crate::domain::macros::{
+    compile_clips, Clip, ClipKind, LoopRegion, MacroDefinition, MacroId, MacroPlaybackMode,
+    MacroTrigger, MIN_TRACKS,
+};
 use crate::domain::mapping::{KeyBindingRule, MappingTarget};
 use crate::domain::profile::Profile;
 use crate::domain::validation::validate_profile_rules;
@@ -35,6 +39,33 @@ impl ProfileStore {
             ));
         }
 
+        for mac in &profile.macros {
+            let trigger_str = match mac.trigger {
+                Some(trig) => format!("{}~{}", trig.source.short_code(), trig.mode.short_code()),
+                None => "NONE".to_string(),
+            };
+            let loop_str = match mac.loop_region {
+                Some(lp) => format!("{}-{}", lp.start_ms, lp.end_ms),
+                None => "NONE".to_string(),
+            };
+            let clips_str = mac
+                .clips
+                .iter()
+                .map(serialize_clip_token)
+                .collect::<Vec<_>>()
+                .join(",");
+            out.push_str(&format!(
+                "macro={}|{}|{}|{}|{}|{}|{}\n",
+                mac.id.0,
+                mac.enabled,
+                escape_field(&mac.name),
+                trigger_str,
+                loop_str,
+                mac.tracks,
+                clips_str
+            ));
+        }
+
         out
     }
 
@@ -48,6 +79,7 @@ impl ProfileStore {
         let mut name: Option<String> = None;
         let mut enabled: Option<bool> = None;
         let mut rules: Vec<KeyBindingRule> = Vec::new();
+        let mut macros: Vec<MacroDefinition> = Vec::new();
 
         for (line_idx, raw_line) in content.lines().enumerate() {
             let line = raw_line.trim();
@@ -101,6 +133,13 @@ impl ProfileStore {
                 "rule" => {
                     rules.push(parse_rule_line(value, line_idx + 1)?);
                 }
+                "macro" => {
+                    macros.push(parse_macro_line(
+                        value,
+                        found_version_or_default(schema_version),
+                        line_idx + 1,
+                    )?);
+                }
                 other => {
                     return Err(StorageError::ParseError(format!(
                         "Line {}: unknown field '{other}'",
@@ -130,6 +169,7 @@ impl ProfileStore {
             schema_version: found_version,
             enabled: enabled.unwrap_or(true),
             rules,
+            macros,
         };
 
         let report = validate_profile_rules(&profile.rules, emergency_stop);
@@ -243,6 +283,201 @@ fn build_rule(
     })
 }
 
+fn found_version_or_default(version: Option<u32>) -> u32 {
+    version.unwrap_or(CURRENT_SCHEMA_VERSION)
+}
+
+fn serialize_clip_token(clip: &Clip) -> String {
+    match clip.kind {
+        ClipKind::Key { key } => {
+            let key_code = key
+                .map(KeyboardKey::short_code)
+                .unwrap_or_else(|| "NONE".to_string());
+            format!(
+                "K:{}:{}:{}:{}:{}",
+                clip.id, clip.track, clip.start_ms, clip.dur_ms, key_code
+            )
+        }
+        ClipKind::Mouse { button } => format!(
+            "M:{}:{}:{}:{}:{}",
+            clip.id,
+            clip.track,
+            clip.start_ms,
+            clip.dur_ms,
+            button.short_code()
+        ),
+    }
+}
+
+fn parse_clip_token(raw: &str, line_num: usize) -> Result<Clip, StorageError> {
+    let parts: Vec<&str> = raw.splitn(6, ':').collect();
+    if parts.len() != 6 {
+        return Err(StorageError::ParseError(format!(
+            "Line {line_num}: malformed macro clip token '{raw}'"
+        )));
+    }
+    let id = parts[1].parse::<u32>().map_err(|_| {
+        StorageError::ParseError(format!("Line {line_num}: invalid clip id '{}'", parts[1]))
+    })?;
+    let track = parts[2].parse::<usize>().map_err(|_| {
+        StorageError::ParseError(format!(
+            "Line {line_num}: invalid clip track '{}'",
+            parts[2]
+        ))
+    })?;
+    let start_ms = parts[3].parse::<u64>().map_err(|_| {
+        StorageError::ParseError(format!(
+            "Line {line_num}: invalid clip start_ms '{}'",
+            parts[3]
+        ))
+    })?;
+    let dur_ms = parts[4]
+        .parse::<u64>()
+        .map_err(|_| {
+            StorageError::ParseError(format!(
+                "Line {line_num}: invalid clip dur_ms '{}'",
+                parts[4]
+            ))
+        })?
+        .max(1);
+
+    let kind = match parts[0] {
+        "K" => {
+            let key = if parts[5].eq_ignore_ascii_case("NONE") {
+                None
+            } else {
+                Some(KeyboardKey::from_short_code(parts[5]).ok_or_else(|| {
+                    StorageError::ParseError(format!(
+                        "Line {line_num}: unknown keyboard key '{}'",
+                        parts[5]
+                    ))
+                })?)
+            };
+            ClipKind::Key { key }
+        }
+        "M" => {
+            let button = MouseButton::from_short_code(parts[5]).ok_or_else(|| {
+                StorageError::ParseError(format!(
+                    "Line {line_num}: unknown mouse button '{}'",
+                    parts[5]
+                ))
+            })?;
+            ClipKind::Mouse { button }
+        }
+        other => {
+            return Err(StorageError::ParseError(format!(
+                "Line {line_num}: unknown clip kind '{other}'"
+            )))
+        }
+    };
+
+    Ok(Clip {
+        id,
+        kind,
+        track,
+        start_ms,
+        dur_ms,
+    })
+}
+
+fn parse_macro_line(
+    raw: &str,
+    schema_version: u32,
+    line_num: usize,
+) -> Result<MacroDefinition, StorageError> {
+    let parts: Vec<&str> = raw.splitn(7, '|').collect();
+    if parts.len() != 7 {
+        return Err(StorageError::ParseError(format!(
+            "Line {line_num}: expected 7 '|' separated macro fields"
+        )));
+    }
+
+    let id = parts[0].parse::<u32>().map_err(|_| {
+        StorageError::ParseError(format!("Line {line_num}: invalid macro id '{}'", parts[0]))
+    })?;
+    let enabled = parts[1].parse::<bool>().map_err(|_| {
+        StorageError::ParseError(format!(
+            "Line {line_num}: invalid macro enabled flag '{}'",
+            parts[1]
+        ))
+    })?;
+    let name = unescape_field(parts[2]).ok_or_else(|| {
+        StorageError::ParseError(format!(
+            "Line {line_num}: invalid escape sequence in macro name"
+        ))
+    })?;
+
+    let trigger = if parts[3].eq_ignore_ascii_case("NONE") {
+        None
+    } else {
+        let (src_raw, mode_raw) = parts[3].split_once('~').ok_or_else(|| {
+            StorageError::ParseError(format!(
+                "Line {line_num}: malformed macro trigger '{}'",
+                parts[3]
+            ))
+        })?;
+        let source = InputSource::from_short_code(src_raw).ok_or_else(|| {
+            StorageError::ParseError(format!(
+                "Line {line_num}: unknown macro trigger source '{src_raw}'"
+            ))
+        })?;
+        let mode = MacroPlaybackMode::from_short_code(mode_raw).ok_or_else(|| {
+            StorageError::ParseError(format!(
+                "Line {line_num}: unknown macro playback mode '{mode_raw}'"
+            ))
+        })?;
+        Some(MacroTrigger { source, mode })
+    };
+
+    let loop_region = if parts[4].eq_ignore_ascii_case("NONE") {
+        None
+    } else {
+        let (ls_raw, le_raw) = parts[4].split_once('-').ok_or_else(|| {
+            StorageError::ParseError(format!(
+                "Line {line_num}: malformed loop region '{}'",
+                parts[4]
+            ))
+        })?;
+        let start_ms = ls_raw.parse::<u64>().map_err(|_| {
+            StorageError::ParseError(format!("Line {line_num}: invalid loop start '{ls_raw}'"))
+        })?;
+        let end_ms = le_raw.parse::<u64>().map_err(|_| {
+            StorageError::ParseError(format!("Line {line_num}: invalid loop end '{le_raw}'"))
+        })?;
+        Some(LoopRegion { start_ms, end_ms })
+    };
+
+    let tracks = parts[5]
+        .parse::<usize>()
+        .map_err(|_| {
+            StorageError::ParseError(format!(
+                "Line {line_num}: invalid track count '{}'",
+                parts[5]
+            ))
+        })?
+        .max(MIN_TRACKS);
+
+    let mut clips = Vec::new();
+    if !parts[6].trim().is_empty() {
+        for tok in parts[6].split(',') {
+            clips.push(parse_clip_token(tok, line_num)?);
+        }
+    }
+
+    let compiled_steps = compile_clips(&clips, loop_region);
+    Ok(MacroDefinition {
+        id: MacroId(id),
+        name,
+        schema_version,
+        enabled,
+        trigger,
+        clips,
+        tracks,
+        loop_region,
+        compiled_steps,
+    })
+}
+
 fn temp_sibling_path(path: &Path) -> PathBuf {
     let mut tmp = path.as_os_str().to_os_string();
     tmp.push(".tmp");
@@ -317,6 +552,50 @@ mod tests {
         let raw = ProfileStore::serialize_profile(&profile);
         let parsed = ProfileStore::deserialize_profile(&raw, EmergencyStopHotkey::default())
             .expect("Serialized profile should parse cleanly");
+        assert_eq!(parsed, profile);
+    }
+
+    #[test]
+    fn serialize_and_deserialize_preserves_multitrack_macros() {
+        let mut profile = Profile::new(9, "Macro | Profile");
+        let mac = MacroDefinition::new(
+            MacroId(1),
+            "Jump | Attack",
+            Some(MacroTrigger {
+                source: InputSource::MouseButton(MouseButton::XButton1),
+                mode: MacroPlaybackMode::HoldLoop,
+            }),
+            vec![
+                Clip {
+                    id: 1,
+                    kind: ClipKind::Mouse {
+                        button: MouseButton::Left,
+                    },
+                    track: 0,
+                    start_ms: 0,
+                    dur_ms: 250,
+                },
+                Clip {
+                    id: 2,
+                    kind: ClipKind::Key {
+                        key: Some(KeyboardKey::KeyE),
+                    },
+                    track: 1,
+                    start_ms: 80,
+                    dur_ms: 100,
+                },
+            ],
+            4,
+            Some(LoopRegion {
+                start_ms: 0,
+                end_ms: 250,
+            }),
+        );
+        profile.upsert_macro(mac);
+
+        let raw = ProfileStore::serialize_profile(&profile);
+        let parsed = ProfileStore::deserialize_profile(&raw, EmergencyStopHotkey::default())
+            .expect("Serialized profile with macros should parse cleanly");
         assert_eq!(parsed, profile);
     }
 

@@ -39,16 +39,15 @@ The planned functional scope covers three core domains (all currently **unimplem
 ## 6. Current Implementation Status
 - **Implemented**:
   - Cargo package scaffold (`ctt-app` `v0.1.0`) in [Cargo.toml](Cargo.toml), [src/lib.rs](src/lib.rs), and [`.gitignore`](.gitignore).
-  - Slint UI shell (`AppWindow`), overview page ([ui/components/home.slint](ui/components/home.slint)), interactive Key Binding view ([ui/components/binding_view.slint](ui/components/binding_view.slint)), and persistent safety status bar ([ui/components/status_bar.slint](ui/components/status_bar.slint)) compiled via [build.rs](build.rs).
-  - Coordinator `CttApp` in [src/app.rs](src/app.rs) and entry point in [src/main.rs](src/main.rs).
-  - Pure `domain` layer (`src/domain/*`): exhaustive `KeyboardKey` (`123` standard keys + `OemScanCode`), `MouseButton`, `MouseWheel`, `MappingTarget`, `CompiledMappingTable` (`O(1)` lookup), `Profile`, and conflict/swap/chain/lockout validator.
+  - Slint UI shell (`AppWindow`), overview page ([ui/components/home.slint](ui/components/home.slint)), interactive Multi-Track NLE Create Macro Studio ([ui/components/macros_view.slint](ui/components/macros_view.slint)) + `import.md` sequence modal ([ui/components/macro_io_modal.slint](ui/components/macro_io_modal.slint)), interactive Key Binding view ([ui/components/binding_view.slint](ui/components/binding_view.slint)), and persistent safety status bar ([ui/components/status_bar.slint](ui/components/status_bar.slint)) compiled via [build.rs](build.rs).
+  - Coordinator `CttApp` in [src/app.rs](src/app.rs), NLE timeline state machine `MacroEditorState` in [src/macro_editor.rs](src/macro_editor.rs), and entry point in [src/main.rs](src/main.rs).
+  - Pure `domain` layer (`src/domain/*`): exhaustive `KeyboardKey` (`123` standard keys + `OemScanCode`), `MouseButton`, `MouseWheel`, `MappingTarget`, `CompiledMappingTable` (`O(1)` lookup), `Profile`, conflict/swap/chain/lockout validator, plus Multi-Track NLE macro timeline models/compiler (`src/domain/macros.rs`) and `import.md` parser/exporter (`src/domain/macro_io.rs`).
   - `engine` layer (`src/engine/*`): `RemapEngine` state machine handling key/combo/mouse press, hold, auto-repeat suppression, profile-switch release, synthetic loop filtering, and emergency stop cleanup.
   - `platform` abstraction (`src/platform/*`): `InputSynthesizer`/`InputInterceptor` traits, `MockInputSynthesizer`, Win32 keymap round-trip table, and `CTT_SYNTHETIC_TAG` packet scaffolding.
-  - `storage` layer (`src/storage/*`): schema-versioned `ProfileStore` with atomic file writes and validation on load.
+  - `storage` layer (`src/storage/*`): schema-versioned `ProfileStore` with atomic file writes and validation on load (persisting both key-binding rules and multi-track macros).
   - Unit tests (`src/**`) and integration tests (`tests/key_mapping_domain_tests.rs`, `tests/remap_engine_tests.rs`).
 - **Not Yet Implemented**:
-  - Live Windows OS hook/synthesis FFI wiring (`SetWindowsHookExW` / `SendInput` — **TBD** under `ADR-003`).
-  - Macro recording, editor UI, and playback timing engine (`src/domain/macros.rs` is currently a stub).
+  - Live Windows OS hook/synthesis FFI wiring (`SetWindowsHookExW` / `SendInput` — **TBD** under `ADR-003`) and background macro playback worker thread dispatching compiled `MacroStep` sequences to OS synthesis.
   - Application config persistence wiring at startup (`AppConfig` disk load/save).
 
 ## 7. Important Constraints & Known Limitations
