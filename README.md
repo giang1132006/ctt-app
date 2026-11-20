@@ -1,4 +1,4 @@
-# ctt-app (CTT Project)
+# ctt-app (KRM Project)
 
 A native Windows desktop utility built with **Rust** and **Slint** for gaming-style peripheral key remapping, mouse button binding, and multi-track NLE (Non-Linear Editor) macro sequence design.
 
