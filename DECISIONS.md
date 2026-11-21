@@ -27,12 +27,16 @@ This file logs key architectural and technology decisions for `ctt-app`, includi
 ---
 
 ## ADR-003: OS-Level Input Hook and Event Synthesis Backend
-- **Status**: **TBD** (Needs decision before Milestone 3)
-- **Context**: `ctt-app` requires reliable low-level interception (including suppression of remapped physical keys), scan code accuracy, mouse movement/clicks, and synthetic event tagging to prevent feedback loops.
+- **Status**: Accepted (Direct Zero-Dependency Win32 FFI for Windows Desktop)
+- **Context**: `ctt-app` requires reliable low-level interception (including suppression of remapped physical keys and mouse buttons), scan code + extended flag accuracy, mouse clicks/scrolls, 1 ms macro timing precision, and exact `dwExtraInfo` (`CTT_SYNTHETIC_TAG`) tagging to prevent feedback loops.
 - **Alternatives Under Consideration**:
-  1. Direct Win32 FFI via `windows` or `windows-sys` (`SetWindowsHookExW`, `SendInput` with `dwExtraInfo` marker).
-  2. Higher-level cross-platform crates (`rdev` for listen/grab + `enigo` for input simulation).
-- **Open Questions**: Is `ctt-app` Windows-only or cross-platform? Do higher-level crates expose sufficient control over `dwExtraInfo` loop tagging, extended scan codes, and Windows low-level hook suppression?
+  1. Direct Win32 FFI (`extern "system"` bindings in `src/platform/windows/ffi.rs` linking `user32`, `kernel32`, and `winmm` for `SetWindowsHookExW`, `SendInput`, and `timeBeginPeriod`).
+  2. External binding crates (`windows` / `windows-sys`).
+  3. Higher-level cross-platform crates (`rdev` for listen/grab + `enigo` for input simulation).
+- **Decision**: Implement direct zero-dependency Win32 FFI behind `InputSynthesizer` and `InputInterceptor` traits in `src/platform/windows/` (`ffi.rs`, `hook.rs`, `synth.rs`, `keymap.rs`), keeping `domain` and `engine` completely platform-agnostic and testable with `MockInputSynthesizer`.
+- **Consequences & Trade-Offs**:
+  - *Pros*: Full control over `WH_KEYBOARD_LL` / `WH_MOUSE_LL` suppression, `WM_MOUSEMOVE` zero-lock bypass, `KEYEVENTF_EXTENDEDKEY` / `KEYEVENTF_SCANCODE`, `dwExtraInfo` (`CTT_SYNTHETIC_TAG`) loop isolation, `timeBeginPeriod(1)` macro timing precision, and zero extra Cargo dependencies.
+  - *Cons*: Windows-specific implementation (`#[cfg(target_os = "windows")]`); future macOS/Linux backends will require separate platform modules behind the existing `platform` traits. Requires careful ABI size unit tests (`win32_ffi_struct_sizes_match_platform_abi`).
 
 ---
 

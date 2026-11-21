@@ -82,11 +82,7 @@ impl RemapEngine {
         synth: &mut dyn InputSynthesizer,
     ) -> Result<(), PlatformError> {
         if enabled {
-            self.status = if self.compiled_table.is_empty() {
-                EngineStatus::Idle
-            } else {
-                EngineStatus::Active
-            };
+            self.status = EngineStatus::Active;
             Ok(())
         } else {
             self.release_all_holds(synth)?;
@@ -103,12 +99,8 @@ impl RemapEngine {
     ) -> Result<(), PlatformError> {
         self.release_all_holds(synth)?;
         self.compiled_table = new_table;
-        if matches!(self.status, EngineStatus::Active | EngineStatus::Idle) {
-            self.status = if self.compiled_table.is_empty() {
-                EngineStatus::Idle
-            } else {
-                EngineStatus::Active
-            };
+        if self.status == EngineStatus::Idle {
+            self.status = EngineStatus::Active;
         }
         Ok(())
     }
@@ -122,6 +114,19 @@ impl RemapEngine {
         self.release_all_holds(synth)
     }
 
+    /// Updates physical modifier tracking for a non-injected key event and returns `true`
+    /// if the event triggers the reserved Emergency Stop chord.
+    pub fn track_physical_modifier_and_check_emergency_stop(&mut self, event: RawKeyEvent) -> bool {
+        if event.is_injected {
+            return false;
+        }
+        self.update_physical_modifiers(event.key, event.state);
+        event.state == KeyState::Down
+            && self
+                .emergency_stop
+                .matches(self.physical_modifiers, event.key)
+    }
+
     /// Evaluates a single physical or injected keyboard event and emits mapped outputs.
     pub fn handle_key_event(
         &mut self,
@@ -133,17 +138,23 @@ impl RemapEngine {
             return Ok(HookDecision::PassThrough);
         }
 
-        // 2. Track physical modifiers regardless of remapping so Emergency Stop stays reachable.
-        self.update_physical_modifiers(event.key, event.state);
-
-        // 3. Emergency Stop takes precedence over all active rules.
-        if event.state == KeyState::Down
-            && self
-                .emergency_stop
-                .matches(self.physical_modifiers, event.key)
-        {
+        // 2 & 3. Track physical modifiers and prioritize Emergency Stop over all active rules.
+        if self.track_physical_modifier_and_check_emergency_stop(event) {
             self.emergency_stop_all(synth)?;
             return Ok(HookDecision::Suppress);
+        }
+
+        self.handle_key_event_post_panic(event, synth)
+    }
+
+    /// Evaluates a physical keyboard event after physical modifiers and Emergency Stop have already been checked.
+    pub fn handle_key_event_post_panic(
+        &mut self,
+        event: RawKeyEvent,
+        synth: &mut dyn InputSynthesizer,
+    ) -> Result<HookDecision, PlatformError> {
+        if event.is_injected {
+            return Ok(HookDecision::PassThrough);
         }
 
         let source = InputSource::Keyboard(event.key);
@@ -227,33 +238,51 @@ impl RemapEngine {
 
         match target {
             MappingTarget::Keyboard(key) => {
-                self.record_hold(source, HeldTarget::Keyboard(key));
                 synth.synthesize(SyntheticOutput::Key {
                     key,
                     state: KeyState::Down,
                 })?;
+                self.record_hold(source, HeldTarget::Keyboard(key));
                 Ok(HookDecision::Suppress)
             }
             MappingTarget::KeyCombo { modifiers, key } => {
-                self.record_hold(source, HeldTarget::KeyCombo { modifiers, key });
+                let mut pressed_mods = Vec::with_capacity(4);
                 for mod_key in modifiers.to_modifier_keys() {
-                    synth.synthesize(SyntheticOutput::Key {
+                    if let Err(err) = synth.synthesize(SyntheticOutput::Key {
                         key: mod_key,
                         state: KeyState::Down,
-                    })?;
+                    }) {
+                        for held_mod in pressed_mods.into_iter().rev() {
+                            let _ = synth.synthesize(SyntheticOutput::Key {
+                                key: held_mod,
+                                state: KeyState::Up,
+                            });
+                        }
+                        return Err(err);
+                    }
+                    pressed_mods.push(mod_key);
                 }
-                synth.synthesize(SyntheticOutput::Key {
+                if let Err(err) = synth.synthesize(SyntheticOutput::Key {
                     key,
                     state: KeyState::Down,
-                })?;
+                }) {
+                    for held_mod in pressed_mods.into_iter().rev() {
+                        let _ = synth.synthesize(SyntheticOutput::Key {
+                            key: held_mod,
+                            state: KeyState::Up,
+                        });
+                    }
+                    return Err(err);
+                }
+                self.record_hold(source, HeldTarget::KeyCombo { modifiers, key });
                 Ok(HookDecision::Suppress)
             }
             MappingTarget::MouseButton(button) => {
-                self.record_hold(source, HeldTarget::MouseButton(button));
                 synth.synthesize(SyntheticOutput::MouseButton {
                     button,
                     state: KeyState::Down,
                 })?;
+                self.record_hold(source, HeldTarget::MouseButton(button));
                 Ok(HookDecision::Suppress)
             }
             MappingTarget::MouseWheel(direction) => {

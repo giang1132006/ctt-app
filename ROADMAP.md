@@ -1,9 +1,9 @@
 # Roadmap (`ctt-app`)
 
 ## Current Development Stage
-**Stage 1 — Layered Key Binding Domain, Remap Engine, Atomic Storage & Slint Binding UI**
+**Stage 2 — Live Windows OS Hook/Synthesis Backend, Background Macro Playback Engine & Automatic Profile Persistence**
 
-The 4-layer repository structure (`domain`, `engine`, `platform`, `storage`, `ui`) and full Keyboard-to-Keyboard/Mouse binding logic are implemented and tested against `MockInputSynthesizer`. Live Win32 FFI hook installation (`ADR-003`) and macro recording/playback remain upcoming milestones.
+The 4-layer architecture (`domain`, `engine`, `platform`, `storage`, `ui`) is now fully wired end-to-end on Windows: live `WH_KEYBOARD_LL` + `WH_MOUSE_LL` interception, `SendInput` synthesis with `CTT_SYNTHETIC_TAG` loop isolation, background multi-track `MacroPlayer` execution (`HoldLoop`, `ToggleLoop`, `RunOnce`, `RepeatCount`, `LoopRegion`), global `Ctrl + Shift + F12` Emergency Stop, and automatic atomic profile persistence.
 
 ---
 

@@ -1,4 +1,7 @@
-//! Top-level UI application coordinator bridging Slint views with domain rules and the remapping engine.
+//! Top-level UI application coordinator bridging Slint views with domain rules,
+//! atomic profile persistence, and the live OS input automation runtime.
+
+use std::path::PathBuf;
 
 use crate::domain::config::AppConfig;
 use crate::domain::keys::{InputSource, KeyboardKey, ModifierMask, MouseButton, MouseWheel};
@@ -8,8 +11,10 @@ use crate::domain::profile::Profile as DomainProfile;
 use crate::domain::validation::{validate_profile_rules, MappingError, MappingWarning};
 use crate::engine::command::EngineStatus;
 use crate::engine::remapper::RemapEngine;
+use crate::engine::runtime::LiveAutomationBackend;
 use crate::macro_editor::MacroEditorState;
 use crate::platform::mock::MockInputSynthesizer;
+use crate::storage::profile_store::ProfileStore;
 
 /// Primary sidebar navigation tabs matching the application layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,7 +102,7 @@ pub struct SavedMacroView {
     pub total_ms: i32,
 }
 
-/// Top-level application state coordinating navigation, profiles, bindings, macros, and the remap engine.
+/// Top-level application state coordinating navigation, profiles, bindings, macros, persistence, and runtime engine.
 #[derive(Debug)]
 pub struct CttApp {
     active_tab: NavTab,
@@ -109,6 +114,9 @@ pub struct CttApp {
     next_profile_id: u32,
     engine: RemapEngine,
     synthesizer: MockInputSynthesizer,
+    live_runtime: Option<LiveAutomationBackend>,
+    profiles_dir: Option<PathBuf>,
+    active_playing_macro: Option<String>,
     macro_editor: MacroEditorState,
     next_macro_id: u32,
     validation_error: String,
@@ -134,6 +142,9 @@ impl Default for CttApp {
             next_profile_id: 1,
             engine,
             synthesizer,
+            live_runtime: None,
+            profiles_dir: None,
+            active_playing_macro: None,
             macro_editor: MacroEditorState::default(),
             next_macro_id: 1,
             validation_error: String::new(),
@@ -147,9 +158,36 @@ impl Default for CttApp {
 
 #[allow(dead_code)]
 impl CttApp {
-    /// Initializes application state with zero profiles so the user creates one first.
+    /// Initializes pure in-memory application state (ideal for deterministic unit tests).
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Initializes application state backed by atomic disk persistence in `profiles_dir` (no OS hooks).
+    pub fn new_with_storage(profiles_dir: PathBuf) -> Self {
+        let mut app = Self {
+            profiles_dir: Some(profiles_dir),
+            ..Self::default()
+        };
+        app.load_persisted_profiles();
+        app
+    }
+
+    /// Initializes the live desktop application with atomic profile persistence and Windows OS hooks/synthesis.
+    ///
+    /// Hooks start safely in `Paused` state (explicit user activation required) while Emergency Stop
+    /// (`Ctrl + Shift + F12`) is armed immediately.
+    pub fn new_live(profiles_dir: PathBuf) -> Self {
+        let mut app = Self::new_with_storage(profiles_dir);
+        let runtime = LiveAutomationBackend::start(app.config.emergency_stop);
+        let hook_err = runtime.hook_error().map(ToOwned::to_owned);
+        app.live_runtime = Some(runtime);
+        app.sync_active_profile_to_engine();
+
+        if let Some(err) = hook_err {
+            app.status = format!("Cảnh báo OS Hook: {err}");
+        }
+        app
     }
 
     /// Returns the currently selected navigation tab.
@@ -157,8 +195,12 @@ impl CttApp {
         self.active_tab
     }
 
-    /// Switches the active navigation tab.
+    /// Switches the active navigation tab, stopping transient macro capture/recording when leaving Macros.
     pub fn set_active_tab(&mut self, tab: NavTab) {
+        if self.active_tab == NavTab::Macros && tab != NavTab::Macros {
+            self.macro_editor.stop_all_active_modes();
+            self.sync_capture_suspension();
+        }
         self.active_tab = tab;
     }
 
@@ -210,6 +252,7 @@ impl CttApp {
         self.active_profile_index = index;
         self.validation_error.clear();
         self.validation_warnings.clear();
+        self.persist_active_profile_id();
         self.sync_active_profile_to_engine();
         self.status = format!("Selected {}", self.active_profile_name());
         true
@@ -229,6 +272,8 @@ impl CttApp {
         self.active_profile_index = self.domain_profiles.len() - 1;
         self.validation_error.clear();
         self.validation_warnings.clear();
+        self.persist_active_profile();
+        self.persist_active_profile_id();
         self.sync_active_profile_to_engine();
         self.status = format!("Created {name}");
         self.active_profile_index
@@ -240,16 +285,21 @@ impl CttApp {
             return false;
         }
 
-        self.domain_profiles.remove(self.active_profile_index);
+        let removed = self.domain_profiles.remove(self.active_profile_index);
         self.ui_profiles.remove(self.active_profile_index);
         self.validation_error.clear();
         self.validation_warnings.clear();
+        self.delete_persisted_profile(removed.id);
 
         if self.domain_profiles.is_empty() {
             self.active_profile_index = 0;
             if self.engine.status() == EngineStatus::Active {
                 let _ = self.engine.set_enabled(false, &mut self.synthesizer);
+                if let Some(rt) = &self.live_runtime {
+                    let _ = rt.set_enabled(false);
+                }
             }
+            self.persist_active_profile_id();
             self.sync_active_profile_to_engine();
             self.status = "Đã xoá profile — hiện chưa có profile nào".to_string();
             return true;
@@ -258,6 +308,7 @@ impl CttApp {
         if self.active_profile_index >= self.domain_profiles.len() {
             self.active_profile_index = self.domain_profiles.len() - 1;
         }
+        self.persist_active_profile_id();
         self.sync_active_profile_to_engine();
         self.status = format!("Active profile: {}", self.active_profile_name());
         true
@@ -349,6 +400,7 @@ impl CttApp {
             .collect();
         self.domain_profiles[idx] = candidate;
         self.ui_profiles[idx] = Profile::from_domain(&self.domain_profiles[idx]);
+        self.persist_active_profile();
         self.sync_active_profile_to_engine();
         self.status = format!("Bound {}", source.display_name());
         Ok(())
@@ -366,6 +418,7 @@ impl CttApp {
         }
         self.ui_profiles[idx] = Profile::from_domain(&self.domain_profiles[idx]);
         self.validation_error.clear();
+        self.persist_active_profile();
         self.sync_active_profile_to_engine();
         self.status = format!("Removed binding for {}", source.display_name());
         true
@@ -468,15 +521,24 @@ impl CttApp {
         &mut self.engine
     }
 
-    /// Enables or pauses the remapping engine safely.
+    /// Enables or pauses the remapping and macro automation engine safely.
     pub fn set_mapping_enabled(&mut self, enabled: bool) {
         if enabled && !self.has_active_profile() {
             self.status = "Vui lòng tạo profile trước khi kích hoạt".to_string();
             return;
         }
+        if let Some(rt) = &self.live_runtime {
+            if let Err(err) = rt.set_enabled(enabled) {
+                self.status = format!("Lỗi OS Hook: {err}");
+                return;
+            }
+        }
         if let Err(err) = self.engine.set_enabled(enabled, &mut self.synthesizer) {
             self.status = format!("Engine error: {err}");
             return;
+        }
+        if !enabled {
+            self.active_playing_macro = None;
         }
         self.status = if enabled {
             format!("Mapping Active ({})", self.active_profile_name())
@@ -485,9 +547,17 @@ impl CttApp {
         };
     }
 
-    /// Immediately triggers Emergency Stop, releasing all active holds and stopping macro recording/preview.
+    /// Immediately triggers Emergency Stop, releasing all active holds and stopping all macros/recording.
     pub fn trigger_emergency_stop(&mut self) {
         self.macro_editor.stop_all_active_modes();
+        self.sync_capture_suspension();
+        self.active_playing_macro = None;
+        if let Some(rt) = &self.live_runtime {
+            if let Err(err) = rt.emergency_stop_all() {
+                self.status = format!("Emergency Stop error: {err}");
+                return;
+            }
+        }
         if let Err(err) = self.engine.emergency_stop_all(&mut self.synthesizer) {
             self.status = format!("Emergency Stop error: {err}");
             return;
@@ -496,6 +566,78 @@ impl CttApp {
             "Emergency Stopped ({})",
             self.config.emergency_stop.display_name()
         );
+    }
+
+    /// Synchronizes UI key/hotkey capture and live-recording state to the live input runtime
+    /// so raw keys reach the editor cleanly without triggering active remaps or macros.
+    pub fn sync_capture_suspension(&self) {
+        if let Some(rt) = &self.live_runtime {
+            let suspended = self.macro_editor.is_recording()
+                || self.macro_editor.is_capturing_clip_key()
+                || self.macro_editor.capturing_hotkey;
+            rt.set_capture_suspended(suspended);
+        }
+    }
+
+    /// Polls background live runtime notifications (global Panic hotkey, active macro, synthesis errors).
+    ///
+    /// Returns `true` when UI state changed and should be re-synced.
+    pub fn poll_runtime_events(&mut self) -> bool {
+        let Some(update) = self
+            .live_runtime
+            .as_ref()
+            .map(LiveAutomationBackend::poll_update)
+        else {
+            return false;
+        };
+
+        let mut changed = false;
+
+        if update.emergency_stop_fired {
+            self.macro_editor.stop_all_active_modes();
+            self.sync_capture_suspension();
+            let _ = self.engine.emergency_stop_all(&mut self.synthesizer);
+            self.active_playing_macro = None;
+            self.status = format!(
+                "Emergency Stopped ({})",
+                self.config.emergency_stop.display_name()
+            );
+            changed = true;
+        }
+
+        if update.active_macro_name != self.active_playing_macro {
+            self.active_playing_macro = update.active_macro_name.clone();
+            if self.engine.status() == EngineStatus::Active {
+                self.status = match &self.active_playing_macro {
+                    Some(name) => format!("Đang chạy Macro: {name}"),
+                    None => format!("Mapping Active ({})", self.active_profile_name()),
+                };
+            }
+            changed = true;
+        }
+
+        if let Some(err) = update.error_message {
+            if err.contains("UIPI") {
+                self.status =
+                    "Không thể gửi phím vào cửa sổ Admin (chạy app bằng Run as administrator)"
+                        .to_string();
+            } else {
+                self.status = format!("Lỗi thực thi input: {err}");
+            }
+            changed = true;
+        }
+
+        changed
+    }
+
+    /// Cleanly stops all macros, releases all virtual holds, and unhooks Windows OS hooks before exit.
+    pub fn shutdown(&mut self) {
+        self.macro_editor.stop_all_active_modes();
+        let _ = self.engine.set_enabled(false, &mut self.synthesizer);
+        if let Some(rt) = &mut self.live_runtime {
+            rt.shutdown();
+        }
+        self.active_playing_macro = None;
     }
 
     /// Returns a read-only reference to the multi-track [`MacroEditorState`].
@@ -544,16 +686,40 @@ impl CttApp {
             return Err(msg);
         }
 
+        let prev_macro_id = self.macro_editor.current_macro_id;
         let candidate_id = MacroId(self.next_macro_id);
         let mac = self
             .macro_editor
             .build_validated_macro(candidate_id, self.config.emergency_stop)?;
+
+        let idx = self.active_profile_index;
+        if let Some(trig) = mac.trigger {
+            if let Some(conflict) = self.domain_profiles[idx].macros.iter().find(|other| {
+                other.id != mac.id
+                    && other.enabled
+                    && other.trigger.is_some_and(|t| t.source == trig.source)
+            }) {
+                self.macro_editor.current_macro_id = prev_macro_id;
+                let msg = format!(
+                    "Hotkey '{}' đã được dùng bởi Macro '{}'. Hãy chọn hotkey khác.",
+                    trig.source.display_name(),
+                    conflict.name
+                );
+                self.macro_editor.status_message = msg.clone();
+                self.macro_editor.status_is_error = true;
+                self.macro_editor.status_is_success = false;
+                self.status = msg.clone();
+                return Err(msg);
+            }
+        }
+
         if mac.id == candidate_id {
             self.next_macro_id += 1;
         }
 
-        let idx = self.active_profile_index;
         self.domain_profiles[idx].upsert_macro(mac.clone());
+        self.persist_active_profile();
+        self.sync_active_profile_to_engine();
         self.status = format!("Đã lưu Macro '{}' ({} clip)", mac.name, mac.clips.len());
         Ok(())
     }
@@ -568,6 +734,7 @@ impl CttApp {
             return false;
         };
         self.macro_editor.load_macro(&mac);
+        self.sync_capture_suspension();
         self.status = format!("Đang chỉnh sửa Macro '{}'", mac.name);
         true
     }
@@ -586,6 +753,8 @@ impl CttApp {
         if self.macro_editor.current_macro_id == Some(mac_id) {
             self.macro_editor.current_macro_id = None;
         }
+        self.persist_active_profile();
+        self.sync_active_profile_to_engine();
         self.status = format!("Đã xoá Macro '{removed_name}'");
         true
     }
@@ -651,8 +820,95 @@ impl CttApp {
             .active_domain_profile()
             .map(DomainProfile::compile_table)
             .unwrap_or_default();
+        let macros = self
+            .active_domain_profile()
+            .map(|p| p.macros.as_slice())
+            .unwrap_or(&[]);
+
+        if let Some(rt) = &self.live_runtime {
+            if let Err(err) = rt.sync_profile(table.clone(), macros) {
+                self.status = format!("Live engine sync error: {err}");
+            }
+        }
         if let Err(err) = self.engine.switch_table(table, &mut self.synthesizer) {
             self.status = format!("Engine sync error: {err}");
+        }
+    }
+
+    fn load_persisted_profiles(&mut self) {
+        let Some(dir) = self.profiles_dir.as_deref() else {
+            return;
+        };
+        let (loaded, warnings) = ProfileStore::load_all_profiles(dir, self.config.emergency_stop);
+        if loaded.is_empty() {
+            if let Some(first_warn) = warnings.first() {
+                self.status = first_warn.clone();
+            }
+            return;
+        }
+
+        let max_profile_id = loaded.iter().map(|p| p.id).max().unwrap_or(0);
+        let max_macro_id = loaded
+            .iter()
+            .flat_map(|p| p.macros.iter().map(|m| m.id.0))
+            .max()
+            .unwrap_or(0);
+
+        self.ui_profiles = loaded.iter().map(Profile::from_domain).collect();
+        self.domain_profiles = loaded;
+        self.next_profile_id = max_profile_id.saturating_add(1).max(1);
+        self.next_profile_number = self.domain_profiles.len().saturating_add(1).max(1);
+        self.next_macro_id = max_macro_id.saturating_add(1).max(1);
+
+        let preferred_id = ProfileStore::load_active_profile_id(dir);
+        self.active_profile_index = preferred_id
+            .and_then(|pid| self.domain_profiles.iter().position(|p| p.id == pid))
+            .unwrap_or(0);
+
+        self.sync_active_profile_to_engine();
+        self.status = if warnings.is_empty() {
+            format!(
+                "Đã tải {} profile · {} (Paused — bấm Kích hoạt để chạy)",
+                self.domain_profiles.len(),
+                self.active_profile_name()
+            )
+        } else {
+            format!(
+                "Đã tải {} profile ({} cảnh báo)",
+                self.domain_profiles.len(),
+                warnings.len()
+            )
+        };
+    }
+
+    fn persist_active_profile(&mut self) {
+        let Some(dir) = self.profiles_dir.as_deref() else {
+            return;
+        };
+        let Some(profile) = self.active_domain_profile() else {
+            return;
+        };
+        if let Err(err) = ProfileStore::save_profile_to_dir(dir, profile) {
+            self.status = format!("Lỗi lưu profile: {err}");
+        }
+    }
+
+    fn persist_active_profile_id(&mut self) {
+        let Some(dir) = self.profiles_dir.as_deref() else {
+            return;
+        };
+        let active_id = self.active_domain_profile().map(|p| p.id);
+        if let Err(err) = ProfileStore::save_active_profile_id(dir, active_id) {
+            self.status = format!("Lỗi lưu trạng thái profile: {err}");
+        }
+    }
+
+    fn delete_persisted_profile(&mut self, profile_id: u32) {
+        let Some(dir) = self.profiles_dir.as_deref() else {
+            return;
+        };
+        if let Err(err) = ProfileStore::delete_profile_from_dir(dir, profile_id) {
+            self.status = format!("Lỗi xoá file profile: {err}");
         }
     }
 }
@@ -861,5 +1117,68 @@ mod tests {
         assert_eq!(app.macro_editor().clips.len(), 2);
         assert!(app.delete_saved_macro(0));
         assert!(app.saved_macro_views().is_empty());
+    }
+
+    #[test]
+    fn test_profile_and_macro_disk_persistence_round_trip_and_hotkey_conflict() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "ctt_app_persist_test_{}_{}",
+            std::process::id(),
+            nanos
+        ));
+
+        {
+            let mut app = CttApp::new_with_storage(dir.clone());
+            assert!(!app.has_active_profile());
+
+            app.create_profile();
+            app.bind_key(
+                KeyboardKey::KeyQ,
+                MappingTarget::MouseButton(MouseButton::Left),
+                "Q -> Click",
+            )
+            .unwrap();
+
+            // Save macro 1 with hotkey F2
+            app.macro_editor_mut().reset_new_macro();
+            app.macro_editor_mut().macro_name = "Combo 1".to_string();
+            app.macro_editor_mut().hotkey = Some(InputSource::Keyboard(KeyboardKey::F2));
+            app.macro_editor_mut().insert_mouse_clip(MouseButton::Right);
+            app.save_current_macro().unwrap();
+
+            // Macro 2 with duplicate hotkey F2 must be rejected without corrupting state
+            app.macro_editor_mut().reset_new_macro();
+            app.macro_editor_mut().macro_name = "Combo 2".to_string();
+            app.macro_editor_mut().hotkey = Some(InputSource::Keyboard(KeyboardKey::F2));
+            app.macro_editor_mut().insert_mouse_clip(MouseButton::Left);
+            assert!(app.save_current_macro().is_err());
+            assert!(app.macro_editor().current_macro_id.is_none());
+
+            // Create a second profile with ONLY a macro (0 key bindings) and verify it activates cleanly
+            app.create_profile();
+            app.macro_editor_mut().reset_new_macro();
+            app.macro_editor_mut().macro_name = "Macro Only".to_string();
+            app.macro_editor_mut().hotkey = Some(InputSource::MouseButton(MouseButton::XButton1));
+            app.macro_editor_mut().insert_mouse_clip(MouseButton::Left);
+            app.save_current_macro().unwrap();
+
+            app.set_mapping_enabled(true);
+            assert!(app.is_mapping_enabled());
+            assert_eq!(app.engine_status(), EngineStatus::Active);
+        }
+
+        // Reload from disk in a brand-new CttApp instance
+        let reloaded = CttApp::new_with_storage(dir.clone());
+        assert_eq!(reloaded.profiles().len(), 2);
+        assert_eq!(reloaded.active_profile_name(), "Profile 2");
+        assert!(!reloaded.is_mapping_enabled()); // Always starts safely Paused!
+        assert_eq!(reloaded.saved_macro_views().len(), 1);
+        assert_eq!(reloaded.saved_macro_views()[0].name, "Macro Only");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

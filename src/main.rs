@@ -4,6 +4,7 @@ use ctt_app::app::{CttApp, NavTab};
 use ctt_app::domain::keys::{InputSource, KeyboardKey, MouseButton, MouseWheel};
 use ctt_app::domain::macros::{MacroPlaybackMode, MAX_MS};
 use ctt_app::engine::command::EngineStatus;
+use ctt_app::storage::profile_store::ProfileStore;
 use slint::{ModelRc, SharedString, Timer, TimerMode, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -190,6 +191,8 @@ fn sync_macro_ui(window: &AppWindow, app: &CttApp, sync_text_inputs: bool) {
     window.set_macro_io_track_count(me.io_validation.track_count);
     window.set_macro_io_total_ms(me.io_validation.total_ms);
     window.set_macro_io_warning_text(me.io_validation.warning_text.clone().into());
+
+    app.sync_capture_suspension();
 }
 
 /// Pushes current [`CttApp`] domain and engine state into the Slint [`AppWindow`] properties.
@@ -706,7 +709,8 @@ fn bind_macro_callbacks(app_window: &AppWindow, state: &Rc<RefCell<CttApp>>) {
 
 fn main() -> Result<(), slint::PlatformError> {
     let app_window = AppWindow::new()?;
-    let state = Rc::new(RefCell::new(CttApp::new()));
+    let profiles_dir = ProfileStore::default_profiles_dir();
+    let state = Rc::new(RefCell::new(CttApp::new_live(profiles_dir)));
 
     init_catalogs(&app_window);
     {
@@ -873,7 +877,9 @@ fn main() -> Result<(), slint::PlatformError> {
     // Handle quit callback
     {
         let app_weak = app_window.as_weak();
+        let state_clone = state.clone();
         app_window.on_quit_requested(move || {
+            state_clone.borrow_mut().shutdown();
             if let Some(window) = app_weak.upgrade() {
                 let _ = window.hide();
             }
@@ -882,14 +888,20 @@ fn main() -> Result<(), slint::PlatformError> {
 
     bind_macro_callbacks(&app_window, &state);
 
-    // 60 FPS animation timer for smooth Preview Playback & Live Recording updates
+    // 60 FPS animation timer for Preview Playback, Live Recording & background OS runtime polling
     let anim_timer = Timer::default();
     {
         let app_weak = app_window.as_weak();
         let state_clone = state.clone();
         anim_timer.start(TimerMode::Repeated, Duration::from_millis(16), move || {
             let mut s = state_clone.borrow_mut();
-            if s.macro_editor_mut().tick_animation() {
+            let anim_changed = s.macro_editor_mut().tick_animation();
+            let runtime_changed = s.poll_runtime_events();
+            if runtime_changed {
+                if let Some(window) = app_weak.upgrade() {
+                    sync_ui(&window, &s);
+                }
+            } else if anim_changed {
                 if let Some(window) = app_weak.upgrade() {
                     sync_macro_ui(&window, &s, false);
                 }
@@ -897,5 +909,7 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
-    app_window.run()
+    let run_result = app_window.run();
+    state.borrow_mut().shutdown();
+    run_result
 }

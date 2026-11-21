@@ -213,6 +213,137 @@ impl ProfileStore {
         let content = fs::read_to_string(path)?;
         Self::deserialize_profile(&content, emergency_stop)
     }
+
+    /// Resolves the default directory for storing persisted profiles.
+    ///
+    /// Prefers a portable `profiles/` folder alongside the executable if it already exists,
+    /// falling back to `%APPDATA%\ctt-app\profiles` on Windows or `./profiles`.
+    pub fn default_profiles_dir() -> PathBuf {
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                let portable_dir = exe_dir.join("profiles");
+                if portable_dir.is_dir() {
+                    return portable_dir;
+                }
+            }
+        }
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            return PathBuf::from(appdata).join("ctt-app").join("profiles");
+        }
+        PathBuf::from("profiles")
+    }
+
+    /// Returns the deterministic file path for `profile_id` inside `dir`.
+    pub fn profile_file_path(dir: &Path, profile_id: u32) -> PathBuf {
+        dir.join(format!("profile_{profile_id}.ctt"))
+    }
+
+    /// Saves `profile` atomically into `dir/profile_<id>.ctt`.
+    pub fn save_profile_to_dir(dir: &Path, profile: &Profile) -> Result<PathBuf, StorageError> {
+        let path = Self::profile_file_path(dir, profile.id);
+        Self::save_profile_atomic(&path, profile)?;
+        Ok(path)
+    }
+
+    /// Deletes the persisted file for `profile_id` from `dir` if it exists.
+    pub fn delete_profile_from_dir(dir: &Path, profile_id: u32) -> Result<(), StorageError> {
+        let path = Self::profile_file_path(dir, profile_id);
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(StorageError::Io(err)),
+        }
+    }
+
+    /// Loads all valid `.ctt` profile files from `dir`, sorted by [`Profile::id`].
+    ///
+    /// Malformed or unreadable files are skipped and reported in the returned warning vector
+    /// rather than panicking or blocking startup.
+    pub fn load_all_profiles(
+        dir: &Path,
+        emergency_stop: EmergencyStopHotkey,
+    ) -> (Vec<Profile>, Vec<String>) {
+        let mut profiles = Vec::new();
+        let mut warnings = Vec::new();
+
+        let entries = match fs::read_dir(dir) {
+            Ok(rd) => rd,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return (profiles, warnings);
+            }
+            Err(err) => {
+                warnings.push(format!("Không thể đọc thư mục profile: {err}"));
+                return (profiles, warnings);
+            }
+        };
+
+        for entry_res in entries {
+            let Ok(entry) = entry_res else {
+                continue;
+            };
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("ctt") {
+                continue;
+            }
+            match Self::load_profile(&path, emergency_stop) {
+                Ok(profile) => profiles.push(profile),
+                Err(err) => {
+                    let fname = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown");
+                    warnings.push(format!("Bỏ qua file '{fname}': {err}"));
+                }
+            }
+        }
+
+        profiles.sort_by_key(|p| p.id);
+        (profiles, warnings)
+    }
+
+    /// Persists the currently selected `active_profile_id` atomically into `dir/app_state.cfg`.
+    pub fn save_active_profile_id(
+        dir: &Path,
+        active_profile_id: Option<u32>,
+    ) -> Result<(), StorageError> {
+        fs::create_dir_all(dir)?;
+        let path = dir.join("app_state.cfg");
+        let tmp_path = temp_sibling_path(&path);
+        let value = active_profile_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "NONE".to_string());
+        let payload = format!(
+            "# ctt-app state\nschema_version={CURRENT_SCHEMA_VERSION}\nactive_profile_id={value}\n"
+        );
+
+        {
+            let mut file = File::create(&tmp_path)?;
+            file.write_all(payload.as_bytes())?;
+            file.sync_all()?;
+        }
+
+        if let Err(err) = fs::rename(&tmp_path, &path) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(StorageError::Io(err));
+        }
+
+        Ok(())
+    }
+
+    /// Reads the last selected `active_profile_id` from `dir/app_state.cfg`, if present and valid.
+    pub fn load_active_profile_id(dir: &Path) -> Option<u32> {
+        let content = fs::read_to_string(dir.join("app_state.cfg")).ok()?;
+        for raw_line in content.lines() {
+            let line = raw_line.trim();
+            if let Some(val) = line.strip_prefix("active_profile_id=") {
+                if val.eq_ignore_ascii_case("NONE") {
+                    return None;
+                }
+                return val.parse::<u32>().ok();
+            }
+        }
+        None
+    }
 }
 
 fn parse_rule_line(raw: &str, line_num: usize) -> Result<KeyBindingRule, StorageError> {

@@ -71,6 +71,13 @@ impl RawMouseButtonEvent {
     }
 }
 
+/// Unified physical or injected OS input event passed from hooks to the runtime dispatcher.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RawInputEvent {
+    Key(RawKeyEvent),
+    MouseButton(RawMouseButtonEvent),
+}
+
 /// Decision returned by the hook evaluator instructing the OS hook whether to forward or swallow input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookDecision {
